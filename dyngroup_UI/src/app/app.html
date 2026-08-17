@@ -1,0 +1,47 @@
+<header class="hdr">
+  <div>
+    <div class="hdr-logo">DYN <span>GROUP</span></div>
+    <div class="hdr-sub">DASHBOARD KPIs STRATÉGIQUES — 27 INDICATEURS</div>
+  </div>
+  <div class="hdr-date">{{ today }}</div>
+</header>
+
+<nav class="nav">
+  <div class="ntab" [class.a]="activeTab==='dashboard'" data-t="dashboard" (click)="setTab('dashboard')">📊 Dashboard
+  </div>
+  <div class="ntab" [class.a]="activeTab==='rh'" data-t="rh" (click)="setTab('rh')">👥 RH</div>
+  <div class="ntab" [class.a]="activeTab==='commercial'" data-t="commercial" (click)="setTab('commercial')">🚀
+    Commercial</div>
+  <div class="ntab" [class.a]="activeTab==='finance'" data-t="finance" (click)="setTab('finance')">💰 Finance</div>
+  <div class="ntab" [class.a]="activeTab==='ops'" data-t="ops" (click)="setTab('ops')">⚙️ Opérations</div>
+</nav>
+
+<div class="owner-legend" title="Survolez un badge pour voir les KPIs associés">
+  <span style="font-size:10px;font-weight:700;color:#888;align-self:center;margin-right:4px;">👤 RESPONSABLES :</span>
+  @for (o of owners; track o.name) {
+  <span [style.background]="o.bg" [style.border]="'1.5px solid '+o.border" [style.color]="o.color" [title]="o.title"
+    style="display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 10px 3px 6px;font-size:10px;font-weight:600;">
+    <span [style.background]="o.ibg"
+      style="color:white;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">{{
+      o.initial }}</span>
+    {{ o.name }} <span style="font-weight:400;opacity:.7">({{ o.kpis }})</span>
+  </span>
+  }
+</div>
+
+@if (activeTab === 'dashboard') {
+<app-dashboard-tab />
+} @else if (activeTab === 'rh') {
+<app-rh-tab />
+} @else if (activeTab === 'commercial') {
+<app-commercial-tab />
+} @else if (activeTab === 'finance') {
+<app-finance-tab />
+} @else if (activeTab === 'ops') {
+<app-ops-tab />
+}
+
+<footer class="ftr">
+  <span class="ftr-t">DYN Group — Données Confidentielles</span>
+  <span class="ftr-t">© appy.solutions 2026</span>
+</footer>

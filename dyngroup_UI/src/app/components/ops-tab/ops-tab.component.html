@@ -1,0 +1,192 @@
+<div style="padding: 4px 0;">
+  <div class="sb" style="background: rgba(20, 184, 166, 0.08); color: var(--ops); border-color: var(--ops)">
+    OPÉRATIONS — IT — PROJETS — QUALITÉ
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <label style="font-size:11px;color:var(--text-secondary);font-weight:500;">Année :</label>
+      <select [(ngModel)]="activeYear" (change)="onYearChange()"
+              style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text)">
+        <option value="2025">2025</option>
+        <option value="2026">2026</option>
+      </select>
+    </span>
+  </div>
+
+  @if (error && !loading) {
+    <div class="sb" style="background:rgba(239,68,68,0.08);color:#ef4444;border-color:#ef4444;margin-bottom:12px;">
+      ⚠ Connexion à la base de données indisponible — données illustratives affichées
+    </div>
+  }
+
+  <div class="g4">
+    <!-- KR10 -->
+    <div class="kc" style="--kc:var(--ops)">
+      <span class="kid">KR10</span>
+      
+      <div class="kc-lbl">Incidents IT (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR10') !== null) {
+          {{ gen(getLatestVal('KR10')!) }}
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR10') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR10')) }} Cible : ≤ 5
+      </div>
+    </div>
+
+    <!-- KR18 -->
+    <div class="kc" style="--kc:var(--ops)">
+      <span class="kid">KR18</span>
+      
+      <div class="kc-lbl">Projets déployés (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR18') !== null) {
+          {{ gen(getLatestVal('KR18')!) }}
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR18') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR18')) }} Objectif : 4/mois
+      </div>
+    </div>
+
+    <!-- KR25 -->
+    <div class="kc" style="--kc:var(--ops)">
+      <span class="kid">KR25</span>
+      
+      <div class="kc-lbl">Production totale / ETP (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR25') !== null) {
+          {{ money(getLatestVal('KR25')! / 1000) }}<span class="kc-unit">kCHF</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR25') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR25')) }} vs Budget
+      </div>
+    </div>
+
+    <!-- KR27 -->
+    <div class="kc" style="--kc:#7B3F00">
+      <span class="kid">KR27</span>
+      
+      <div class="kc-lbl">Tâches ouvertes (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR27') !== null) {
+          {{ gen(getLatestVal('KR27')!) }}<span class="kc-unit">%</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR27') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR27')) }} Cible : ≤ {{ getLatestTarget('KR27') ?? 20 }}%
+      </div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="ct">KR10 — Incidents IT mensuels </div>
+      <div class="cs">Nombre incidents — seuil max 5</div>
+      <div class="cw"><canvas id="op-kr10"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="ct">KR18 — Projets déployés </div>
+      <div class="cs">Déploiements mensuels vs objectif</div>
+      <div class="cw"><canvas id="op-kr18"></canvas></div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <!-- KR19 Audits internes (données réelles — kpi.okr_monthly, KR19) -->
+    <div class="card">
+      <div class="ct">KR19 — Audits internes <span class="tip" data-tip="Les audits internes s'afficheront ici dès qu'une tâche contenant « audit » sera créée dans un projet interne (ex. « Interne », « Support interne ») dans Odoo. Les audits réalisés pour des clients (révisions) ne sont pas comptés."></span><!-- BADGE-FICTIF-DEMO:KR19|Ops --><span class="badge fictif-demo">Fictif (démo)</span>
+        
+      </div>
+      <div class="cs">Tâches « audit » des projets internes (Interne, Support interne…), révisions clients exclues — kpi.okr_monthly (KR19)</div>
+      <div class="cw"><canvas id="op-kr19"></canvas></div>
+    </div>
+    
+    <!-- KR25 Production -->
+    <div class="card">
+      <div class="ct">KR25 — Production cumulée totale CHF / ETP </div>
+      <div class="cs">Production en kCHF par ETP actif</div>
+      <div class="cw"><canvas id="op-kr25"></canvas></div>
+    </div>
+  </div>
+
+  <!-- KR26 Production par département (données réelles — kpi.okr_monthly, dimension department) -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="ct">KR26 — Production moyenne / ETP — Comparatif par département
+      <!-- BADGE-FICTIF-DEMO:KR26|Ops --><span class="badge fictif-demo">Fictif (démo)</span>
+    </div>
+    <div class="cs">kCHF par mois et par ETP, par département — kpi.okr_monthly (KR26)</div>
+    <div class="g2" style="margin:16px 0 0 0;">
+      <div class="cw-lg"><canvas id="op-kr26"></canvas></div>
+      <div class="table-wrapper">
+        <table class="dt">
+          <thead>
+            <tr>
+              <th>Département</th>
+              @for (m of kr26Months; track m) {
+                <th>{{ m.slice(0, 7) }}</th>
+              }
+              <th>Moy.</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (d of kr26DeptRows; track d.dept) {
+              <tr>
+                <td>{{ d.dept }}</td>
+                @for (m of kr26Months; track m) {
+                  <td>{{ d.byMonth[m] !== null && d.byMonth[m] !== undefined ? gen(d.byMonth[m]!) : '—' }}</td>
+                }
+                <td>
+                  @if (d.avg !== null) {
+                    <span class="badge b-ok">{{ gen(d.avg!) }}k</span>
+                  } @else { — }
+                </td>
+              </tr>
+            }
+            @if (kr26DeptRows.length === 0) {
+              <tr><td [attr.colspan]="kr26Months.length + 2" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <!-- KR22 -->
+    <div class="card">
+      <div class="ct">KR22 — Taux de facturation </div>
+      <div class="cs">% mensuel — cible 90%</div>
+      <div class="cw"><canvas id="op-kr22"></canvas></div>
+
+      <!-- Table KR22 dynamique -->
+      <div class="table-wrapper" style="margin-top:12px;">
+        <table class="dt">
+          <thead><tr><th>Mois</th><th>Taux de facturation</th><th>Cible</th><th>Statut</th></tr></thead>
+          <tbody>
+            @for (entry of (krMap['KR22'] || []).slice(-4); track entry.period_key) {
+              <tr>
+                <td>{{ entry.period_key }}</td>
+                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) + '%' : '—' }}</td>
+                <td>{{ entry.target_value !== null ? gen(entry.target_value) + '%' : '90%' }}</td>
+                <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'Alerte' : '—' }}</span></td>
+              </tr>
+            }
+            @if (!krMap['KR22'] || krMap['KR22'].length === 0) {
+              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- KR27 % tâches ouvertes (données réelles — kpi.okr_monthly, KR27) -->
+    <div class="card">
+      <div class="ct">KR27 — % de tâches ouvertes par mois
+        <!-- BADGE-FICTIF-DEMO:KR27|Ops --><span class="badge fictif-demo">Fictif (démo)</span>
+      </div>
+      <div class="cs">Part des tâches créées dans le mois encore ouvertes (1_done/1_canceled exclus) — kpi.okr_monthly (KR27)</div>
+      <div class="cw"><canvas id="op-kr27"></canvas></div>
+    </div>
+  </div>
+</div>

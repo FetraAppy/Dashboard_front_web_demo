@@ -1,0 +1,270 @@
+<div style="padding: 4px 0;">
+  <div class="sb" style="background: rgba(34, 197, 94, 0.08); color: var(--commercial); border-color: var(--commercial)">
+    COMMERCIAL & MARKETING
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <label style="font-size:11px;color:var(--text-secondary);font-weight:500;">Année :</label>
+      <select [(ngModel)]="activeYear" (change)="onYearChange()"
+              style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text)">
+        <option value="2025">2025</option>
+        <option value="2026">2026</option>
+      </select>
+    </span>
+  </div>
+
+  @if (error && !loading) {
+    <div class="sb" style="background:rgba(239,68,68,0.08);color:#ef4444;border-color:#ef4444;margin-bottom:12px;">
+      ⚠ Connexion à la base de données indisponible — données illustratives affichées
+    </div>
+  }
+
+  <!-- KPI Row -->
+  <div class="g3">
+    <div class="kc" style="--kc:var(--commercial)">
+      <span class="kid">KR07</span>
+      
+      <div class="kc-lbl">NPS proxy (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR07') !== null) {
+          {{ gen(getLatestVal('KR07')!) }}<span class="kc-unit">pts</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR07') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR07')) }} Cible : {{ getTargetVal('KR07') ?? 7 }}+
+      </div>
+    </div>
+    <div class="kc" style="--kc:var(--commercial)">
+      <span class="kid">KR16</span>
+      
+      <div class="kc-lbl">Leads reçus (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR16') !== null) {
+          {{ gen(getLatestVal('KR16')!) }}
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR16') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR16')) }} Cible : {{ getTargetVal('KR16') ?? 20 }}
+      </div>
+    </div>
+    <div class="kc" style="--kc:var(--commercial)">
+      <span class="kid">KR09</span>
+      
+      <div class="kc-lbl">Panier moyen (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR09') !== null) {
+          {{ money(getLatestVal('KR09')! / 1000) }}<span class="kc-unit">kCHF</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR09') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR09')) }} Cible : {{ getTargetVal('KR09') !== null ? (getTargetVal('KR09')! / 1000) + 'k' : '5k' }}
+      </div>
+    </div>
+  </div>
+
+  <!-- NPS + Leads -->
+  <div class="g2">
+    <!-- NPS Detail card -->
+    <div class="card">
+      <div class="ct">KR07 — NPS (Net Promoter Score proxy)
+        
+      </div>
+      <div class="cs">Score NPS proxy via sondages (scoring_percentage moyen) — évolution mensuelle</div>
+
+      <!-- NPS Widget dynamique -->
+      <div class="nps-widget">
+        <div class="nps-score">
+           @if (getLatestVal('KR07') !== null) { {{ gen(getLatestVal('KR07')!) }} } @else { — }
+        </div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">Score NPS — Dernier mois disponible</div>
+        @if (latest['KR07']?.variance_pct !== null && latest['KR07']?.variance_pct !== undefined) {
+          <div style="font-size:11px;margin-top:6px;" [class]="getLatestStatus('KR07') === 'green' ? 'kc-chg up' : 'kc-chg warn'">
+            {{ latest['KR07'].variance_pct! >= 0 ? '+' : '' }}{{ gen(latest['KR07'].variance_pct!) }}% vs cible
+          </div>
+        }
+      </div>
+
+      <!-- NPS évolution chart -->
+      <div class="cw-sm" style="margin-top:16px;"><canvas id="co-kr07"></canvas></div>
+    </div>
+
+    <!-- Leads + Funnel -->
+    <div class="card">
+      <div class="ct">KR16 — Leads reçus par mois
+        
+      </div>
+      <div class="cs">Volume mensuel de leads entrants — source Odoo CRM</div>
+      <div class="cw-sm"><canvas id="co-kr16"></canvas></div>
+
+      <div style="margin-top:20px;">
+        <div class="ct">KR17 — Taux de leads traités
+          
+        </div>
+        <div class="cs">
+          @if (getLatestVal('KR17') !== null) {
+            Dernier mois : {{ gen(getLatestVal('KR17')!) }}% traités (cible 100%)
+          } @else {
+            % leads fermés / total leads — données Odoo CRM
+          }
+        </div>
+        <div style="margin-top:12px;">
+          @if (getLatestVal('KR16') !== null && getLatestVal('KR17') !== null) {
+            <!-- Funnel dynamique -->
+            @let totalLeads = getLatestVal('KR16')!;
+            @let traitePct = getLatestVal('KR17')!;
+            <div class="fn-stage"><div class="fn-lbl">Leads reçus</div><div class="fn-bar" style="background:#FF8F1C;width:100%">{{ gen(totalLeads) }}</div><div class="fn-pct">100%</div></div>
+            <div class="fn-stage"><div class="fn-lbl">Traités</div><div class="fn-bar" style="background:#FF8F1C;" [style.width]="traitePct + '%'">{{ gen(totalLeads * traitePct / 100) }}</div><div class="fn-pct">{{ gen(traitePct) }}%</div></div>
+          } @else {
+            <!-- Funnel illustratif -->
+            <span class="badge" style="background:rgba(249,115,22,0.1);color:#f97316;border:1px solid #f97316;font-size:9px;margin-bottom:8px;display:inline-block;">Données illustratives <span class="tip" data-tip="Chiffres illustratifs affichés en attendant les données réelles. Ils seront remplacés automatiquement dès que des leads seront enregistrés dans Odoo pour l'année sélectionnée."></span></span>
+            <div class="fn-stage"><div class="fn-lbl">Leads reçus</div><div class="fn-bar" style="background:#FF8F1C;width:100%">28</div><div class="fn-pct">100%</div></div>
+            <div class="fn-stage"><div class="fn-lbl">Qualifiés</div><div class="fn-bar" style="background:#FF8F1C;width:75%">21</div><div class="fn-pct">75%</div></div>
+            <div class="fn-stage"><div class="fn-lbl">Offres envoyées</div><div class="fn-bar" style="background:#FF8F1C;width:46%">13</div><div class="fn-pct">46%</div></div>
+            <div class="fn-stage"><div class="fn-lbl">Signés</div><div class="fn-bar" style="background:#00BB31;width:29%">8</div><div class="fn-pct">29%</div></div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Reviews + Engagement digital -->
+  <div class="g12">
+    <!-- Google Reviews Widget (données réelles — kpi.okr_monthly, KR05) -->
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;">
+      <div class="ct" style="text-align:left;width:100%">KR05 — Avis Google
+        
+      </div>
+      <div class="cs" style="text-align:left;width:100%;margin-bottom:20px;">Note moyenne &amp; volume — tous les avis Google (toutes années)</div>
+      <div class="big-rat" style="cursor:help" (mouseenter)="onRatingHover($event)" (mousemove)="moveTip($event)" (mouseleave)="hideTip()">
+        @if (kr05LatestRating !== null) { {{ gen(kr05LatestRating!) }} } @else { — }
+      </div>
+      <div class="stars">★★★★★</div>
+      <div class="rat-cnt">
+        @if (kr05LatestRating !== null) { Basé sur {{ kr05TotalReviews }} avis Google } @else { Aucun avis disponible <span class="tip" data-tip="Les avis proviennent de Google. La note et le nombre d'avis apparaîtront automatiquement dès que de nouveaux avis seront publiés."></span> }
+      </div>
+      <div style="margin-top:16px;width:100%">
+        @if (starDist.length > 0) {
+          @for (s of starDist; track s.rating) {
+            <div class="rating-bar-row" style="cursor:help" (mouseenter)="onStarHover(s.rating, $event)" (mousemove)="moveTip($event)" (mouseleave)="hideTip()">
+              <span>{{ s.rating }} ★</span>
+              <div class="rating-progress-bg">
+                <div class="rating-progress-bar" [style.width]="s.pct + '%'" [style.background]="s.rating >= 4 ? 'var(--commercial)' : s.rating === 3 ? 'var(--tax)' : 'var(--assure)'"></div>
+              </div>
+              <span>{{ gen(s.pct) }}%</span>
+            </div>
+          }
+        } @else {
+          <div style="font-size:11px;color:var(--text-secondary);text-align:center;">Aucune évaluation détaillée disponible</div>
+        }
+      </div>
+
+      @if (tipVisible) {
+        <div class="rev-tip" [style.left.px]="tipX" [style.top.px]="tipY">
+          <div class="rev-tip-title">{{ tipTitle }}</div>
+          @if (tipRandom) {
+            <div class="rev-tip-item">
+              <div class="rev-tip-stars">{{ tipRandom.rating }} ★ — {{ tipRandom.author || 'Avis Google' }}</div>
+              <div class="rev-tip-text">{{ tipRandom.text }}</div>
+            </div>
+          }
+          @if (tipList.length) {
+            <div class="rev-tip-more">
+              @for (r of tipList; track $index) {
+                <div class="rev-tip-item">
+                  <div class="rev-tip-stars">{{ r.rating }} ★ — {{ r.author || 'Avis Google' }}</div>
+                  <div class="rev-tip-text">{{ r.text }}</div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Digital Engagement (données réelles — kpi.okr_monthly, KR04 par réseau) -->
+    <div class="card">
+      <div class="ct">KR04 — Engagement digital par canal
+        
+      </div>
+      <div class="cs">Engagement (likes + commentaires + partages) par réseau — source kpi.okr_monthly (KR04)</div>
+      <div class="cw"><canvas id="co-kr04"></canvas></div>
+
+      @if (kr04NetworksList.length === 0) {
+        <div style="margin-top:12px;font-size:11px;color:var(--text-secondary);">Aucune donnée d'engagement disponible pour {{ activeYear }} <span class="tip" data-tip="Les données d'engagement proviennent des réseaux sociaux (likes, commentaires, partages). Elles apparaîtront dès que le suivi des réseaux sera renseigné dans Odoo."></span></div>
+      }
+    </div>
+  </div>
+
+  <!-- Mouvement clients + Panier moyen -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">KR08 — Mouvement des clients vs M-1
+        <!-- BADGE-FICTIF-DEMO:KR08|Commercial --><span class="badge fictif-demo">Fictif (démo)</span>
+      </div>
+      <div class="cs">Acquisitions, pertes et solde net — kpi.okr_monthly (KR08)</div>
+      <div class="cw"><canvas id="co-kr08"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="ct">KR09 — Panier moyen / offre clients
+        
+      </div>
+      <div class="cs">CHF moyen mensuel par contrat actif — source Odoo</div>
+      <div class="cw"><canvas id="co-kr09"></canvas></div>
+
+      <!-- Table KR09 dynamique -->
+      <div class="table-wrapper" style="margin-top:12px;">
+        <table class="dt">
+          <thead><tr><th>Mois</th><th>Panier moyen (CHF)</th><th>Budget (CHF)</th><th>Écart %</th></tr></thead>
+          <tbody>
+            @for (entry of (krMap['KR09'] || []).slice(-4); track entry.period_key) {
+              <tr>
+                <td>{{ entry.period_key }}</td>
+                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
+                <td>{{ entry.target_value !== null ? gen(entry.target_value) : '—' }}</td>
+                <td>
+                  @if (entry.variance_pct !== null) {
+                    <span [class]="'badge ' + getStatusBadge(entry.status)">
+                      {{ entry.variance_pct >= 0 ? '+' : '' }}{{ gen(entry.variance_pct) }}%
+                    </span>
+                  } @else { — }
+                </td>
+              </tr>
+            }
+            @if (!krMap['KR09'] || krMap['KR09'].length === 0) {
+              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles <span class="tip" data-tip="Les valeurs apparaîtront automatiquement dès que des données existeront dans Odoo pour l'année sélectionnée."></span></td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pareto Top 10 clients (données réelles — kpi.okr_monthly, dimension client) -->
+  <div class="card" style="margin-bottom:0">
+    <div class="ct">KR23 — Top 10 clients en % du CA (Pareto)
+      <!-- BADGE-FICTIF-DEMO:KR23|Commercial --><span class="badge fictif-demo">Fictif (démo)</span>
+    </div>
+    <div class="cs">Part dans le CA + courbe cumulée — dernier mois disponible — kpi.okr_monthly (KR23)</div>
+    <div class="g2" style="margin:16px 0 0 0;">
+      <div class="cw-lg"><canvas id="co-kr23"></canvas></div>
+      <div class="table-wrapper">
+        <table class="dt">
+          <thead><tr><th>#</th><th>Client</th><th>% du CA</th><th>% cumulé</th></tr></thead>
+          <tbody>
+            @for (c of kr23Clients; track c.name; let i = $index) {
+              <tr>
+                <td>{{ i + 1 }}</td>
+                <td>{{ c.name }}</td>
+                <td>{{ gen(c.pct) }}%</td>
+                <td>{{ gen(c.cum) }}%</td>
+              </tr>
+            }
+            @if (kr23Clients.length === 0) {
+              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles <span class="tip" data-tip="Le classement apparaîtra automatiquement dès qu'une facturation client sera enregistrée dans Odoo pour l'année sélectionnée."></span></td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>

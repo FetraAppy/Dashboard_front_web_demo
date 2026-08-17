@@ -1,0 +1,131 @@
+<div style="padding: 4px 0;">
+  <!-- Section Banner -->
+  <div class="sb" style="background: rgba(172, 79, 198, 0.08); color: var(--rh); border-color: var(--rh)">
+    RH — RESSOURCES HUMAINES
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <label style="font-size:11px;color:var(--text-secondary);font-weight:500;">Année :</label>
+      <select [(ngModel)]="activeYear" (change)="onYearChange()"
+              style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text)">
+        <option value="2025">2025</option>
+        <option value="2026">2026</option>
+      </select>
+    </span>
+  </div>
+
+  @if (error && !loading) {
+    <div class="sb" style="background:rgba(239,68,68,0.08);color:#ef4444;border-color:#ef4444;margin-bottom:12px;">
+      ⚠ Connexion à la base de données indisponible — données illustratives affichées
+    </div>
+  }
+
+  <!-- KPI Row -->
+  <div class="g3">
+    <!-- KR01 -->
+    <div class="kc" style="--kc:var(--rh)">
+      <span class="kid">KR01</span>
+      
+      <div class="kc-lbl">Ratio entrées/sorties</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR01') !== null) {
+          {{ gen(getLatestVal('KR01')!) }}<span class="kc-unit">x</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR01') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR01')) }} Base 2025
+      </div>
+    </div>
+
+    <!-- KR03 (source externe) -->
+    <div class="kc" style="--kc:var(--rh)">
+      <span class="kid">KR03</span>
+      
+      <div class="kc-lbl">Heures formation certifiante / ETP <span class="tip-r" data-tip="En attente : les heures de formation certifiante ne sont pas encore suivies dans Odoo. Cette valeur s'affichera automatiquement dès que le suivi des formations sera mis en place."></span></div>
+      <div class="kc-val"><span style="color:var(--text-secondary)">—</span></div>
+      <div class="kc-chg warn">⚠ En attente de données</div>
+    </div>
+
+    <!-- KR06 -->
+    <div class="kc" style="--kc:var(--commercial)">
+      <span class="kid">KR06</span>
+      
+      <div class="kc-lbl">Heures innovation (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR06') !== null) {
+          {{ gen(getLatestVal('KR06')!) }}<span class="kc-unit">%</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR06') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR06')) }} Cible : {{ getLatestTarget('KR06') ?? 5 }}%
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row: KR01 + KR06 -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">
+        KR01 — Ratio entrées / sorties
+        
+      </div>
+      <div class="cs">
+        @if (kr01Entries.length > 0) { Ratio mensuel (entrées/sorties) — données Odoo }
+        @else { Flux mensuels d'effectifs — données illustratives <span class="tip" data-tip="Chiffres illustratifs : aucun mouvement d'effectifs n'a encore été enregistré pour l'année sélectionnée. Les données réelles remplaceront automatiquement ces chiffres dès que des entrées et sorties seront saisies dans Odoo."></span> }
+      </div>
+      <div class="cw"><canvas id="rh-kr01"></canvas></div>
+
+      <!-- Table KR01 dynamique -->
+      <div class="table-wrapper" style="margin-top:16px;">
+        <table class="dt">
+          <thead>
+            <tr><th>Mois</th><th>Ratio In/Out</th><th>Variance %</th><th>Statut</th></tr>
+          </thead>
+          <tbody>
+            @for (entry of kr01Entries.slice(-4); track entry.period_key) {
+              <tr>
+                <td>{{ entry.period_key }}</td>
+                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) + 'x' : '—' }}</td>
+                <td>{{ entry.variance_pct !== null ? (entry.variance_pct >= 0 ? '+' : '') + gen(entry.variance_pct) + '%' : '—' }}</td>
+                <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'Alerte' : '—' }}</span></td>
+              </tr>
+            }
+            @if (kr01Entries.length === 0) {
+              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non encore disponibles pour {{ activeYear }} <span class="tip" data-tip="Les données apparaîtront automatiquement dès que des entrées et sorties d'effectifs seront enregistrées dans Odoo pour cette année."></span></td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ct">
+        KR06 — Heures innovation / Total heures
+        
+      </div>
+      <div class="cs">Ratio mensuel en % — cible 5%</div>
+      <div class="cw"><canvas id="rh-kr06"></canvas></div>
+    </div>
+  </div>
+
+  <!-- KR02 Heures supplémentaires & solde vacances (données réelles — kpi.okr_monthly, KR02) -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="ct">
+      KR02 — Heures supplémentaires &amp; solde vacances / ETP
+      <!-- BADGE-FICTIF-DEMO:KR02|RH --><span class="badge fictif-demo">Fictif (démo)</span>
+    </div>
+    <div class="cs">Heures pointées au-delà du théorique, vacances prises et solde restant (h) — kpi.okr_monthly (KR02)</div>
+    <div class="cw-lg"><canvas id="rh-kr02"></canvas></div>
+  </div>
+
+  <!-- KR03 Formations (source externe) -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="ct">
+      KR03 — Heures de formation certifiante par ETP <span class="tip" data-tip="Les données apparaîtront automatiquement dès que les heures de formation certifiante seront enregistrées dans Odoo (par exemple dans le suivi annuel des employés)."></span>
+      
+    </div>
+    <div class="cs">Récapitulatif YTD par département — en attente du suivi des formations dans Odoo</div>
+    <div style="padding:24px 0;text-align:center;color:var(--text-secondary);font-size:11px;">
+      En attente de données — le suivi des formations n'est pas encore mis en place dans Odoo
+    </div>
+  </div>
+
+</div>

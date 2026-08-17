@@ -1,0 +1,140 @@
+<div style="padding: 4px 0;">
+  <!-- Section Banner -->
+  <div class="sb" style="background: var(--th-bg); color: var(--text-primary); border-color: var(--text-primary);">
+    <span>KPIs CLÉS — VUE CONSOLIDÉE</span>
+    <span style="font-size: 11px; opacity: 0.8; font-weight: 500;">DYN Group — Exercice {{ activeYear }}</span>
+  </div>
+
+  <!-- Filters Bar -->
+  <div class="filter-bar" style="margin: 0 0 24px 0;">
+    <div class="filter-item">
+      <span class="filter-title">📅 ANNÉE :</span>
+      <div class="select-wrapper">
+        <select class="filter-select" [(ngModel)]="activeYear" (change)="onYearChange()">
+          <option value="2026">2026</option>
+          <option value="2025">2025</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 1 : 4 KPI Cards -->
+  <div class="g4">
+    <div class="kc" style="--kc:var(--finance)">
+      <span class="kid">KR15</span>
+
+      <div class="kc-lbl">Chiffre d'affaires (dernier mois)</div>
+      <div class="kc-val">{{ formatK(caLatest) }}<span class="kc-unit">k CHF</span></div>
+      <div class="kc-chg up" *ngIf="!error; else caErr">Données réelles — kpi.okr_monthly (KR15)</div>
+      <ng-template #caErr><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+
+    <div class="kc" style="--kc:var(--commercial)">
+      <span class="kid">KR07</span>
+
+      <div class="kc-lbl">NPS (dernier mois)</div>
+      <div class="kc-val">{{ kpiFmt('KR07', ' pts', 1) }}</div>
+      <div class="kc-chg neu" *ngIf="!error; else k07Err">Cible : {{ kpiTargetLabel('KR07', '') }} /10</div>
+      <ng-template #k07Err><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+
+    <div class="kc" style="--kc:var(--rh)">
+      <span class="kid">KR22</span>
+
+      <div class="kc-lbl">Taux de facturation (dernier mois)</div>
+      <div class="kc-val">{{ kpiFmt('KR22', '%') }}</div>
+      <div class="kc-chg neu" *ngIf="!error; else k22Err">Cible : {{ kpiTargetLabel('KR22', '%') }}</div>
+      <ng-template #k22Err><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+
+    <div class="kc" style="--kc:var(--ops)">
+      <span class="kid">KR11</span>
+
+      <div class="kc-lbl">Trésorerie (dernier mois)</div>
+      <div class="kc-val">{{ formatK(tresLatest) }}<span class="kc-unit">k CHF</span></div>
+      <div class="kc-chg up" *ngIf="!error; else tresErr">Données réelles — kpi.okr_monthly (KR11)</div>
+      <ng-template #tresErr><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+  </div>
+
+  <!-- Row 2 : 4 KPI Cards -->
+  <div class="g4">
+    <div class="kc" style="--kc:var(--commercial)">
+      <span class="kid">KR16</span>
+
+      <div class="kc-lbl">Leads reçus (dernier mois)</div>
+      <div class="kc-val">{{ kpiFmt('KR16', '') }}</div>
+      <div class="kc-chg neu" *ngIf="!error; else k16Err">Cible : {{ kpiTargetLabel('KR16', '') }}</div>
+      <ng-template #k16Err><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+
+    <div class="kc" style="--kc:var(--ops)">
+      <span class="kid">KR10</span>
+
+      <div class="kc-lbl">Incidents IT (dernier mois)</div>
+      <div class="kc-val">{{ kpiFmt('KR10', '') }}</div>
+      <div class="kc-chg neu" *ngIf="!error; else k10Err">Seuil E1 : {{ kpiTargetLabel('KR10', '') }}</div>
+      <ng-template #k10Err><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+
+    <div class="kc" style="--kc:var(--assure)">
+      <span class="kid">KR13</span>
+
+      <div class="kc-lbl">Dépassement budget frais fixes <span class="tip-r" data-tip="En attente : le budget des frais fixes n'est pas encore saisi dans Odoo. La valeur s'affichera automatiquement dès que les budgets seront renseignés (suivi annuel des employés)."></span></div>
+      <div class="kc-val">{{ kpiFmt('KR13', '%', 1, true) }}</div>
+      <div class="kc-chg neu" *ngIf="!error; else k13Err">Cible : {{ kpiTargetLabel('KR13', '%') }}</div>
+      <ng-template #k13Err><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+
+    <div class="kc" style="--kc:var(--ops)">
+      <span class="kid">KR18</span>
+
+      <div class="kc-lbl">Projets déployés (dernier mois)</div>
+      <div class="kc-val">{{ kpiFmt('KR18', '') }}</div>
+      <div class="kc-chg neu" *ngIf="!error; else k18Err">Données réelles — kpi.okr_monthly (KR18)</div>
+      <ng-template #k18Err><div class="kc-chg neu">Données indisponibles</div></ng-template>
+    </div>
+  </div>
+
+  <!-- Row 3 : 2 Charts — CA & Trésorerie -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">
+        CA mensuel — KR15
+
+      </div>
+      <div class="cs">Réalisé vs Budget vs N-1 (CHF 000)</div>
+      <div class="cw"><canvas id="d-ca"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="ct">
+        Trésorerie mensuelle — KR11
+
+      </div>
+      <div class="cs">Solde mensuel kCHF — seuil minimum 500k</div>
+      <div class="cw"><canvas id="d-tres"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Row 4 : 2 Charts — Production & Facturation -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">
+        Production mensuelle — KR25
+
+      </div>
+      <div class="cs">Production CHF par mois (kCHF) — kpi.okr_monthly</div>
+      <div class="cw"><canvas id="d-prod"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="ct">
+        Taux de facturation vs production — KR22
+
+      </div>
+      <div class="cs">% mensuel — kpi.okr_monthly</div>
+      <div class="cw"><canvas id="d-fact"></canvas></div>
+    </div>
+  </div>
+</div>

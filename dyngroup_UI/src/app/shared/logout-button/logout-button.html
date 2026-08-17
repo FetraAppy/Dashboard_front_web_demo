@@ -1,0 +1,30 @@
+<div class="profile-menu">
+  <button
+    class="profile-trigger"
+    (click)="toggle()"
+    [class.open]="isOpen"
+    [title]="userName"
+    aria-haspopup="true"
+    [attr.aria-expanded]="isOpen"
+  >
+    <span class="profile-avatar">{{ userInitials }}</span>
+    <span class="profile-caret" [class.up]="isOpen">▾</span>
+  </button>
+
+  @if (isOpen) {
+    <div class="profile-dropdown" role="menu">
+      <div class="profile-header">
+        <div class="profile-header-avatar">{{ userInitials }}</div>
+        <div class="profile-header-info">
+          <span class="profile-name">{{ userName }}</span>
+          <span class="profile-email">{{ userName }}</span>
+        </div>
+      </div>
+      <div class="profile-divider"></div>
+      <button class="profile-item" role="menuitem" (click)="logout()">
+        <span class="profile-item-icon">⏻</span>
+        <span>Se déconnecter</span>
+      </button>
+    </div>
+  }
+</div>

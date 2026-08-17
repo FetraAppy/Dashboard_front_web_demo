@@ -1,0 +1,16 @@
+/* OKR Dashboard — styles du layout supplémentaires */
+
+/* Overriding tab content padding (tabs render inside content-body) */
+:host {
+  display: block;
+}
+
+/* Scoped content-body override for tab inner divs */
+.content-body app-dashboard-tab .tc,
+.content-body app-rh-tab .tc,
+.content-body app-commercial-tab .tc,
+.content-body app-finance-tab .tc,
+.content-body app-ops-tab .tc {
+  display: block;
+  padding: 0;
+}

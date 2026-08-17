@@ -1,0 +1,219 @@
+<div style="padding: 4px 0;">
+  <div class="sb" style="background: rgba(59, 130, 246, 0.08); color: var(--finance); border-color: var(--finance)">
+    FINANCE & CONTRÔLE DE GESTION
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <label style="font-size:11px;color:var(--text-secondary);font-weight:500;">Année :</label>
+      <select [(ngModel)]="activeYear" (change)="onYearChange()"
+              style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text)">
+        <option value="2025">2025</option>
+        <option value="2026">2026</option>
+      </select>
+    </span>
+  </div>
+
+  @if (error && !loading) {
+    <div class="sb" style="background:rgba(239,68,68,0.08);color:#ef4444;border-color:#ef4444;margin-bottom:12px;">
+      ⚠ Connexion à la base de données indisponible — données illustratives affichées
+    </div>
+  }
+
+  <!-- KPI Row (4 cartes) -->
+  <div class="g4">
+    <!-- KR15 -->
+    <div class="kc" style="--kc:var(--finance)">
+      <span class="kid">KR15</span>
+      
+      <div class="kc-lbl">CA (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR15') !== null) {
+          {{ money(getLatestVal('KR15')! / 1000) }}<span class="kc-unit">kCHF</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR15') === 'green' ? 'up' : getLatestStatus('KR15') === 'red' ? 'down' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR15')) }}
+        @if (latest['KR15']?.variance_pct !== null && latest['KR15']?.variance_pct !== undefined) {
+          {{ latest['KR15'].variance_pct! >= 0 ? '+' : '' }}{{ gen(latest['KR15'].variance_pct!) }}% vs cible
+        } @else { Cible : Budget
+        }
+      </div>
+    </div>
+    <!-- KR14 -->
+    <div class="kc" style="--kc:var(--finance)">
+      <span class="kid">KR14</span>
+      
+      <div class="kc-lbl">MB2 (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR14') !== null) {
+          {{ money(getLatestVal('KR14')! / 1000) }}<span class="kc-unit">kCHF</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR14') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR14')) }} vs Budget
+      </div>
+    </div>
+    <!-- KR11 -->
+    <div class="kc" style="--kc:var(--finance)">
+      <span class="kid">KR11</span>
+      
+      <div class="kc-lbl">Trésorerie (dernier mois)</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR11') !== null) {
+          {{ money(getLatestVal('KR11')! / 1000000) }}<span class="kc-unit">M CHF</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR11') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR11')) }} Seuil min : 500k
+      </div>
+    </div>
+    <!-- KR20 -->
+    <div class="kc" style="--kc:#0094C6">
+      <span class="kid">KR20</span>
+      
+      <div class="kc-lbl">DSO moyen</div>
+      <div class="kc-val">
+        @if (getLatestVal('KR20') !== null) {
+          {{ gen(getLatestVal('KR20')!) }}<span class="kc-unit">j</span>
+        } @else { <span style="color:var(--text-secondary)">—</span> }
+      </div>
+      <div class="kc-chg" [class]="getLatestStatus('KR20') === 'green' ? 'up' : 'warn'">
+        {{ getStatusIcon(getLatestStatus('KR20')) }} Cible : ≤ 45j
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid 1: CA & MB2 -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">KR15 — CA mensuel
+        
+      </div>
+      <div class="cs">Réalisé vs Budget (kCHF)</div>
+      <div class="cw"><canvas id="fi-kr15"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="ct">KR14 — Marge Brute 2 mensuelle
+        
+      </div>
+      <div class="cs">kCHF par mois vs budget</div>
+      <div class="cw"><canvas id="fi-kr14"></canvas></div>
+
+      <!-- Table KR14 dynamique -->
+      <div class="table-wrapper" style="margin-top:12px;">
+        <table class="dt">
+          <thead><tr><th>Mois</th><th>CA (kCHF)</th><th>MB2 (kCHF)</th><th>Cible MB2</th><th>Écart</th></tr></thead>
+          <tbody>
+            @for (entry of (krMap['KR14'] || []).slice(-3); track entry.period_key) {
+              <tr>
+                <td>{{ entry.period_key }}</td>
+                <td>—</td>
+                <td>{{ entry.actual_value !== null ? money(entry.actual_value / 1000) : '—' }}</td>
+                <td>{{ entry.target_value !== null ? money(entry.target_value / 1000) : '—' }}</td>
+                <td>
+                  @if (entry.variance_pct !== null) {
+                    <span [class]="'badge ' + getStatusBadge(entry.status)">
+                      {{ entry.variance_pct >= 0 ? '+' : '' }}{{ gen(entry.variance_pct) }}%
+                    </span>
+                  } @else { — }
+                </td>
+              </tr>
+            }
+            @if (!krMap['KR14'] || krMap['KR14'].length === 0) {
+              <tr><td colspan="5" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid 2: Trésorerie & Dépassement budget -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">KR11 — Trésorerie mensuelle
+        
+      </div>
+      <div class="cs">Solde CHF — seuil minimum 500k</div>
+      <div class="cw"><canvas id="fi-kr11"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="ct">KR13 — Dépassement budget frais fixes <span class="tip" data-tip="Le budget des frais fixes doit être renseigné dans Odoo (suivi annuel des employés). Dès que les montants seront saisis, le dépassement s'affichera automatiquement ici."></span>
+        
+      </div>
+      <div class="cs">Écart en % vs budget (seuil ±5%)</div>
+      <div style="padding:24px 0;text-align:center;color:var(--text-secondary);font-size:11px;">
+        En attente de données — le budget des frais fixes n'est pas encore saisi dans Odoo
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid 3: DSO & KR12 -->
+  <div class="g2">
+    <div class="card">
+      <div class="ct">KR12 — Rapports livrés (clôture des projets)
+        
+      </div>
+      <div class="cs">Délai moyen de clôture des projets (jours) — cible J+10 <span class="tip" data-tip="Un rapport est considéré comme livré lorsque son projet est clôturé (archivé) dans Odoo. Le délai affiché est la moyenne entre l'ouverture et la clôture des projets du mois."></span></div>
+      <div class="table-wrapper" style="margin-top:12px;">
+        <table class="dt">
+          <thead><tr><th>Mois</th><th>Délai moyen (j)</th><th>Cible</th><th>Statut</th></tr></thead>
+          <tbody>
+            @for (entry of (krMap['KR12'] || []).slice(-6); track entry.period_key) {
+              <tr>
+                <td>{{ entry.period_key }}</td>
+                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
+                <td>{{ entry.target_value !== null ? gen(entry.target_value) + 'j' : '10j' }}</td>
+                <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'En retard' : '—' }}</span></td>
+              </tr>
+            }
+            @if (!krMap['KR12'] || krMap['KR12'].length === 0) {
+              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ct">KR20 — DSO débiteurs
+        
+      </div>
+      <div class="cs">Jours de délai moyen — cible ≤ 45j</div>
+      <div class="cw"><canvas id="fi-kr2021"></canvas></div>
+
+      <!-- Table KR20 dynamique -->
+      <div class="table-wrapper" style="margin-top:12px;">
+        <table class="dt">
+          <thead><tr><th>Mois</th><th>DSO (j)</th><th>Cible</th><th>Statut</th></tr></thead>
+          <tbody>
+            @for (entry of (krMap['KR20'] || []).slice(-4); track entry.period_key) {
+              <tr>
+                <td>{{ entry.period_key }}</td>
+                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
+                <td>{{ entry.target_value !== null ? gen(entry.target_value) + 'j' : '45j' }}</td>
+                <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'Alerte' : '—' }}</span></td>
+              </tr>
+            }
+            @if (!krMap['KR20'] || krMap['KR20'].length === 0) {
+              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TEC Aging (données réelles — kpi.okr_monthly, KR24 dimension bucket) -->
+  <div class="card" style="margin-bottom:0">
+    <div class="ct">KR24 — Distribution ancienneté des lignes TEC
+      
+    </div>
+    <div class="cs">
+      Répartition par tranche d'âge (kCHF)
+      @if (kr24Avg !== null) { — âge moyen : {{ gen(kr24Avg!) }} jours (cible ≤ 60j) }
+    </div>
+    <div class="cw-lg"><canvas id="fi-kr24"></canvas></div>
+  </div>
+
+</div>

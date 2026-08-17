@@ -1,0 +1,169 @@
+<div class="app-container">
+
+  <!-- ===== SIDEBAR ===== -->
+  <aside class="sidebar">
+
+    <!-- Logo -->
+    <!-- <div class="logo-container">
+      <div class="logo">
+        DYN<span>&nbsp;GROUP</span>
+      </div>
+    </div> -->
+
+    <!-- Nav Items -->
+    <nav class="nav-links">
+      <div
+        *ngFor="let item of navItems"
+        [class]="'nav-item ' + (activeTab === item.id ? 'active' : '')"
+        (click)="setTab(item.id)"
+        [id]="'nav-' + item.id"
+        [title]="item.label"
+      >
+        <!-- SVG Icon (safe HTML) -->
+        <span [innerHTML]="item.icon" style="flex-shrink:0;display:flex;align-items:center;"></span>
+        <!-- Label revealed on hover -->
+        <span>{{ item.label }}</span>
+      </div>
+    </nav>
+
+
+  </aside>
+
+  <!-- ===== MAIN WRAPPER ===== -->
+  <div class="main-wrapper">
+
+    <!-- HEADER -->
+    <header class="header">
+      <div style="display: flex; align-items: center; gap: 24px;">
+        <div class="header-logo">DYN <span>GROUP</span></div>
+        <div class="header-title-sec">
+          <h1>{{ tabLabel }}</h1>
+          <p>DASHBOARD KPIs STRATÉGIQUES — 27 INDICATEURS</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="date-badge">{{ currentDate }}</div>
+
+        <button
+          class="theme-toggle-btn"
+          (click)="toggleTheme()"
+          [title]="theme === 'light' ? 'Activer mode sombre' : 'Activer mode clair'"
+          id="btn-theme-toggle"
+        >
+          {{ theme === 'light' ? '🌙' : '☀️' }}
+        </button>
+
+        <app-logout-button />
+
+      </div>
+    </header>
+
+    <!-- FILTER BAR -->
+    <!-- <div class="filter-bar"> -->
+      <!-- Responsable filter -->
+      <!-- <div class="filter-item">
+        <span class="filter-title">👤 RESPONSABLE :</span>
+        <div class="select-wrapper">
+          <select
+            [value]="activeManager || ''"
+            (change)="onManagerChange($event)"
+            class="filter-select"
+          >
+            <option value="">Tous les responsables</option>
+            <option value="Emilie">Emilie</option>
+            <option value="Gaël">Gaël</option>
+            <option value="Joost">Joost</option>
+            <option value="Matthieu">Matthieu</option>
+            <option value="Sandrine">Sandrine</option>
+            <option value="Sarah">Sarah</option>
+            <option value="Sergio">Sergio</option>
+            <option value="Thomas">Thomas</option>
+            <option value="Valentin">Valentin</option>
+            <option value="Zlatan">Zlatan</option>
+          </select>
+        </div>
+      </div> -->
+
+      <!-- Période filter -->
+      <!-- <div class="filter-item date-filters">
+        <span class="filter-title">📅 PÉRIODE :</span>
+        <div class="date-input-wrapper">
+          <span class="date-label">Du</span>
+          <input
+            type="date"
+            [value]="startDate"
+            (change)="onStartDateChange($event)"
+            min="2025-06-01"
+            max="2026-05-31"
+            class="filter-date-input"
+          />
+          <span class="date-label">Au</span>
+          <input
+            type="date"
+            [value]="endDate"
+            (change)="onEndDateChange($event)"
+            min="2025-06-01"
+            max="2026-05-31"
+            class="filter-date-input"
+          />
+        </div>
+      </div> -->
+
+      <!-- Reset button -->
+      <!-- @if (activeManager || startDate !== '2025-06-01' || endDate !== '2026-05-31') {
+        <button
+          class="clear-filter-btn"
+          (click)="resetFilters()"
+          title="Réinitialiser les filtres"
+          style="margin-left: auto;"
+        >
+          ✕ Réinitialiser
+        </button>
+      } -->
+
+      <!-- Owners badge bar -->
+      <!-- <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-left:auto;">
+        <span
+          *ngFor="let o of owners"
+          [style.background]="o.bg"
+          [style.border]="'1.5px solid ' + o.border"
+          [style.color]="o.color"
+          [title]="o.title"
+          style="display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 10px 3px 6px;font-size:10px;font-weight:600;cursor:default;"
+        >
+          <span
+            [style.background]="o.ibg"
+            style="color:white;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;"
+          >{{ o.initial }}</span>
+          {{ o.name }}
+          <span style="font-weight:400;opacity:.7">({{ o.kpis }})</span>
+        </span>
+      </div>
+    </div> -->
+
+    <!-- PAGE CONTENT -->
+    <main class="content-body">
+      @if (activeTab === 'dashboard') {
+        <app-dashboard-tab />
+      } @else if (activeTab === 'rh') {
+        <app-rh-tab />
+      } @else if (activeTab === 'commercial') {
+        <app-commercial-tab />
+      } @else if (activeTab === 'finance') {
+        <app-finance-tab />
+      } @else if (activeTab === 'ops') {
+        <app-ops-tab />
+      } @else if (activeTab === 'operational') {
+        <app-operationnel-dashboard [isDark]="theme === 'dark'" />
+      }
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+      <div>DYN Group — Confidentiel — Dashboard KPIs Stratégiques</div>
+      <div>© 2026 - appy.solutions</div>
+    </footer>
+
+  </div>
+</div>

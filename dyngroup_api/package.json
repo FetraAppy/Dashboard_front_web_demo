@@ -1,0 +1,37 @@
+{
+  "name": "dyngroup_api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Marcello-appy/dyngroup_api.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Marcello-appy/dyngroup_api/issues"
+  },
+  "homepage": "https://github.com/Marcello-appy/dyngroup_api#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.0.1",
+    "@types/pg": "^8.20.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^6.0.3"
+  },
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  }
+}

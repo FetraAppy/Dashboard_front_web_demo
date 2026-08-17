@@ -1,0 +1,67 @@
+<div class="home-wrapper">
+
+  <!-- Header -->
+  <header class="home-header">
+    <div class="home-header-left">
+      <div class="home-logo">DYN <span>GROUP</span></div>
+      <div class="home-header-sep"></div>
+      <div class="home-subtitle">PORTAIL DES TABLEAUX DE BORD</div>
+    </div>
+    <div class="home-date">{{ today }}</div>
+  </header>
+
+  <!-- Main -->
+  <main class="home-main">
+    <div class="home-intro">
+      <h1 class="home-title">Sélectionnez un tableau de bord</h1>
+      <p class="home-desc">Accédez rapidement à vos dashboards stratégiques et opérationnels.</p>
+    </div>
+
+    <div class="home-cards-grid">
+
+      <!-- Dashboard OKR -->
+      <a routerLink="/okr" class="home-dash-card home-dash-card--okr" id="card-okr">
+        <div class="home-dash-card__glow"></div>
+        <div class="home-dash-card__icon">📊</div>
+        <div class="home-dash-card__content">
+          <div class="home-dash-card__tag">STRATÉGIQUE</div>
+          <h2 class="home-dash-card__title">Dashboard OKR</h2>
+          <p class="home-dash-card__desc">
+            Suivi des KPIs stratégiques — 27 indicateurs clés de performance, répartis par domaine (RH, Commercial, Finance, Opérations).
+          </p>
+          <div class="home-dash-card__meta">
+            <span class="home-meta-badge home-meta-badge--okr">27 KPIs</span>
+            <span class="home-meta-badge home-meta-badge--okr">5 Domaines</span>
+          </div>
+        </div>
+        <div class="home-dash-card__arrow">→</div>
+      </a>
+
+      <!-- Dashboard Opérationnel -->
+      <a routerLink="/operationnel" class="home-dash-card home-dash-card--ops" id="card-ops">
+        <div class="home-dash-card__glow"></div>
+        <div class="home-dash-card__icon">⚙️</div>
+        <div class="home-dash-card__content">
+          <div class="home-dash-card__tag">OPÉRATIONNEL</div>
+          <h2 class="home-dash-card__title">Dashboard Opérationnel</h2>
+          <p class="home-dash-card__desc">
+            Vue opérationnelle en temps réel — suivi des activités quotidiennes, ressources, performance terrain et tableaux de bord d'équipe.
+          </p>
+          <div class="home-dash-card__meta">
+            <span class="home-meta-badge home-meta-badge--ops">Temps réel</span>
+            <span class="home-meta-badge home-meta-badge--ops">Multi-vues</span>
+          </div>
+        </div>
+        <div class="home-dash-card__arrow">→</div>
+      </a>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="home-footer">
+    <span>DYN Group — Données Confidentielles</span>
+    <span>Mise à jour : Mai 2026 | Prochaine révision : Juin 2026</span>
+  </footer>
+
+</div>

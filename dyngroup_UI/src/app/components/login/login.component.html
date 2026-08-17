@@ -1,0 +1,53 @@
+<div class="login-wrapper">
+  <div class="login-card">
+
+    <!-- Logo -->
+    <div class="login-logo">
+      DYN <span>GROUP</span>
+    </div>
+    <div class="login-subtitle">Accès Sécurisé — KPIs Stratégiques</div>
+
+    <!-- Form -->
+    <form (submit)="onSubmit()" class="login-form">
+
+      <div style="margin-bottom: 20px;">
+        <label class="form-label" for="email">Adresse email</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          [(ngModel)]="email"
+          placeholder="exemple@dyngroup.ch"
+          required
+          [disabled]="isLoading"
+          class="login-input"
+          autocomplete="email"
+        />
+      </div>
+
+      <div style="margin-bottom: 28px;">
+        <label class="form-label" for="password">Mot de passe</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          [(ngModel)]="password"
+          placeholder="••••••••"
+          required
+          [disabled]="isLoading"
+          class="login-input"
+        />
+      </div>
+
+      <div *ngIf="errorMessage" class="login-error">
+        ⚠️ {{ errorMessage }}
+      </div>
+
+      <button type="submit" [disabled]="isLoading" class="login-submit-btn">
+        <span *ngIf="!isLoading">Se connecter</span>
+        <span *ngIf="isLoading" class="login-loader"></span>
+      </button>
+
+    </form>
+  </div>
+</div>
