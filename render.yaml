@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: dyngroup-api
+    env: node
+    rootDir: dyngroup_api
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_EMAIL
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+
+  - type: web
+    name: dyngroup-ui
+    env: static
+    rootDir: dyngroup_UI
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist/dyngroup-ui/browser
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
