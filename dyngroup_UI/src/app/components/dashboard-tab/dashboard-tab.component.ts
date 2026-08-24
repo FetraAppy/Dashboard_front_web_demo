@@ -91,7 +91,7 @@ export class DashboardTabComponent implements OnInit, AfterViewInit, OnDestroy {
     const safetyTimeout = setTimeout(() => {
       this.loading = false;
       this.error = true;
-      this.buildFallback();
+      // this.buildFallback(); // désactivé — données mockées trompeuses, voir buildFallback()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     }, 10000);
@@ -138,7 +138,7 @@ export class DashboardTabComponent implements OnInit, AfterViewInit, OnDestroy {
       clearTimeout(safetyTimeout);
       console.error('[dashboard-tab]', e);
       this.error = true;
-      this.buildFallback();
+      // this.buildFallback(); // désactivé — données mockées trompeuses, voir buildFallback()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     } finally {
@@ -148,27 +148,30 @@ export class DashboardTabComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onYearChange() { this.fetchData(); }
 
-  /** Valeurs statiques de secours si l'API est indisponible */
-  private buildFallback() {
-    const n = this.maxMonths;
-    const M12 = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
-    this.labels12 = M12.slice(0, n).map(m => `${m} ${this.activeYear}`);
-    this.caSeries = [90, 103, 292, 435, 339, 178, null, null, null, null, null, null].slice(0, n);
-    this.tresSeries = [980, 1050, 920, 1100, 1180, 1250, 1080, 1150, 1200, 1220, 1240, 1240].slice(0, n);
-    this.tresTarget = 500;
-    this.billingSeries = [81, 82, 80, 83, 82, 84, 81, 83, 83, 84, 84, 84].slice(0, n);
-    this.prodSeries = [42, 45, 41, 48, 50, 52, 44, 49, 51, 53, 54, 56].slice(0, n);
-    this.caLatest = 339;
-    this.tresLatest = 1240;
-    this.kpis = {
-      KR07: { value: 47, target: 7, status: 'ok' },
-      KR22: { value: 84, target: 90, status: 'warn' },
-      KR16: { value: 28, target: 20, status: 'ok' },
-      KR10: { value: 4, target: 5, status: 'ok' },
-      KR13: { value: 2.3, target: 0, status: 'warn' },
-      KR18: { value: 17, target: null, status: 'ok' },
-    };
-  }
+  // Désactivé : injectait des données mockées en dur en cas d'échec API,
+  // ce qui affichait des chiffres inventés sans que ce soit clair pour l'utilisateur.
+  // En cas d'erreur, `error = true` suffit — le template affiche déjà "Données indisponibles".
+  // /** Valeurs statiques de secours si l'API est indisponible */
+  // private buildFallback() {
+  //   const n = this.maxMonths;
+  //   const M12 = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+  //   this.labels12 = M12.slice(0, n).map(m => `${m} ${this.activeYear}`);
+  //   this.caSeries = [90, 103, 292, 435, 339, 178, null, null, null, null, null, null].slice(0, n);
+  //   this.tresSeries = [980, 1050, 920, 1100, 1180, 1250, 1080, 1150, 1200, 1220, 1240, 1240].slice(0, n);
+  //   this.tresTarget = 500;
+  //   this.billingSeries = [81, 82, 80, 83, 82, 84, 81, 83, 83, 84, 84, 84].slice(0, n);
+  //   this.prodSeries = [42, 45, 41, 48, 50, 52, 44, 49, 51, 53, 54, 56].slice(0, n);
+  //   this.caLatest = 339;
+  //   this.tresLatest = 1240;
+  //   this.kpis = {
+  //     KR07: { value: 47, target: 7, status: 'ok' },
+  //     KR22: { value: 84, target: 90, status: 'warn' },
+  //     KR16: { value: 28, target: 20, status: 'ok' },
+  //     KR10: { value: 4, target: 5, status: 'ok' },
+  //     KR13: { value: 2.3, target: 0, status: 'warn' },
+  //     KR18: { value: 17, target: null, status: 'ok' },
+  //   };
+  // }
 
   formatK(val: number | null): string {
     return this.fmt.money(val);

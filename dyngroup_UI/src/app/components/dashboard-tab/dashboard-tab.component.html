@@ -80,7 +80,7 @@
     <div class="kc" style="--kc:var(--assure)">
       <span class="kid">KR13</span>
 
-      <div class="kc-lbl">Dépassement budget frais fixes <span class="tip-r" data-tip="En attente : le budget des frais fixes n'est pas encore saisi dans Odoo. La valeur s'affichera automatiquement dès que les budgets seront renseignés (suivi annuel des employés)."></span></div>
+      <div class="kc-lbl">Dépassement budget frais fixes <span class="tip-r" data-tip="Écart des frais fixes (position 6 du plan comptable) vs la moyenne glissante des 12 mois précédents, faute de budget saisi dans Odoo. Positif = dépassement."></span></div>
       <div class="kc-val">{{ kpiFmt('KR13', '%', 1, true) }}</div>
       <div class="kc-chg neu" *ngIf="!error; else k13Err">Cible : {{ kpiTargetLabel('KR13', '%') }}</div>
       <ng-template #k13Err><div class="kc-chg neu">Données indisponibles</div></ng-template>

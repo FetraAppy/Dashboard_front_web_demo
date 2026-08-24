@@ -111,7 +111,7 @@ export class CommercialTabComponent implements OnInit, AfterViewInit, OnDestroy 
     const safetyTimeout = setTimeout(() => {
       this.loading = false;
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     }, 10000);
@@ -188,7 +188,7 @@ export class CommercialTabComponent implements OnInit, AfterViewInit, OnDestroy 
       clearTimeout(safetyTimeout);
       console.error('[commercial-tab]', e);
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     } finally {
@@ -248,43 +248,46 @@ export class CommercialTabComponent implements OnInit, AfterViewInit, OnDestroy 
     this.kr23Clients = top10.map(r => { cum += r.pct; return { name: r.name, pct: r.pct, cum: Math.round(cum * 100) / 100 }; });
   }
 
-  private buildFallbackSeries() {
-    const n = this.maxMonths;
-    const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
-    this.labels12 = M12.slice(0, n);
-    this.kr07Series = [28, 31, 30, 33, 35, 37, 38, 40, 42, 43, 45, 47].slice(0, n);
-    this.kr16Series = [15, 18, 12, 20, 22, 24, 18, 21, 23, 25, 26, 28].slice(0, n);
-    this.kr09Series = [1720, 1740, 1750, 1770, 1780, 1800, 1790, 1810, 1830, 1810, 1840, 1870].slice(0, n);
-    this.kr17Series = [75, 80, 72, 82, 85, 88, 79, 84, 86, 87, 89, 100].slice(0, n);
-    this.kr04Networks = {
-      facebook: [3800, 3900, 4200, 4400, 4600, 4700, 4400, 4700, 4900, 4820, 5110, 5380].slice(0, n),
-      linkedin: [9000, 9500, 10200, 10800, 11200, 11500, 11000, 11800, 12500, 12400, 13200, 14100].slice(0, n),
-      instagram: [2800, 2900, 3000, 3100, 3200, 3300, 3100, 3150, 3200, 3200, 3150, 3400].slice(0, n),
-    };
-    this.kr04NetworksList = Object.keys(this.kr04Networks);
-    this.kr05RatingSeries = [4.5, 4.6, 4.6, 4.7, 4.6, 4.6, 4.7, 4.7, 4.6, 4.6, 4.6, 4.6].slice(0, n);
-    this.kr05CountSeries = [18, 22, 20, 25, 24, 28, 26, 30, 27, 29, 31, 33].slice(0, n);
-    this.kr05LatestRating = 4.6;
-    this.kr05TotalReviews = 312;
-    this.kr05HasData = true;
-    this.kr05Distribution = [
-      { rating: 5, nb: 243 }, { rating: 4, nb: 47 }, { rating: 3, nb: 16 },
-      { rating: 2, nb: 4 }, { rating: 1, nb: 2 },
-    ];
-    this.kr08Net = [2, 2, 2, 2, 2, 2, 3, 2, 3, 2, 3, 1].slice(0, n);
-    this.kr08Detail = {
-      total: [230, 232, 234, 236, 238, 240, 238, 241, 243, 240, 244, 245].slice(0, n),
-      acquisitions: [3, 4, 3, 4, 5, 4, 5, 4, 4, 4, 5, 3].slice(0, n),
-      pertes: [-1, -2, -1, -2, -3, -2, -2, -2, -1, -2, -1, -2].slice(0, n),
-    };
-    this.kr23Clients = [
-      { name: 'Helvetia SA', pct: 11.2, cum: 11.2 }, { name: 'SwissRe', pct: 9.3, cum: 20.5 },
-      { name: 'Zurich Insurance', pct: 7.5, cum: 28.0 }, { name: 'Novartis', pct: 6.9, cum: 34.9 },
-      { name: 'Nestlé', pct: 6.0, cum: 40.9 }, { name: 'ABB', pct: 5.0, cum: 45.9 },
-      { name: 'Roche', pct: 4.6, cum: 50.5 }, { name: 'UBS', pct: 4.0, cum: 54.5 },
-      { name: 'SGS', pct: 3.5, cum: 58.0 }, { name: 'Swatch', pct: 3.0, cum: 61.0 },
-    ];
-  }
+  // Désactivé : injectait des données mockées en dur en cas d'échec API — trompeur
+  // (jusqu'à des noms de clients fictifs comme "Helvetia SA"/"SwissRe"). `error = true`
+  // suffit ; le template doit afficher un état "indisponible" plutôt que ces chiffres inventés.
+  // private buildFallbackSeries() {
+  //   const n = this.maxMonths;
+  //   const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
+  //   this.labels12 = M12.slice(0, n);
+  //   this.kr07Series = [28, 31, 30, 33, 35, 37, 38, 40, 42, 43, 45, 47].slice(0, n);
+  //   this.kr16Series = [15, 18, 12, 20, 22, 24, 18, 21, 23, 25, 26, 28].slice(0, n);
+  //   this.kr09Series = [1720, 1740, 1750, 1770, 1780, 1800, 1790, 1810, 1830, 1810, 1840, 1870].slice(0, n);
+  //   this.kr17Series = [75, 80, 72, 82, 85, 88, 79, 84, 86, 87, 89, 100].slice(0, n);
+  //   this.kr04Networks = {
+  //     facebook: [3800, 3900, 4200, 4400, 4600, 4700, 4400, 4700, 4900, 4820, 5110, 5380].slice(0, n),
+  //     linkedin: [9000, 9500, 10200, 10800, 11200, 11500, 11000, 11800, 12500, 12400, 13200, 14100].slice(0, n),
+  //     instagram: [2800, 2900, 3000, 3100, 3200, 3300, 3100, 3150, 3200, 3200, 3150, 3400].slice(0, n),
+  //   };
+  //   this.kr04NetworksList = Object.keys(this.kr04Networks);
+  //   this.kr05RatingSeries = [4.5, 4.6, 4.6, 4.7, 4.6, 4.6, 4.7, 4.7, 4.6, 4.6, 4.6, 4.6].slice(0, n);
+  //   this.kr05CountSeries = [18, 22, 20, 25, 24, 28, 26, 30, 27, 29, 31, 33].slice(0, n);
+  //   this.kr05LatestRating = 4.6;
+  //   this.kr05TotalReviews = 312;
+  //   this.kr05HasData = true;
+  //   this.kr05Distribution = [
+  //     { rating: 5, nb: 243 }, { rating: 4, nb: 47 }, { rating: 3, nb: 16 },
+  //     { rating: 2, nb: 4 }, { rating: 1, nb: 2 },
+  //   ];
+  //   this.kr08Net = [2, 2, 2, 2, 2, 2, 3, 2, 3, 2, 3, 1].slice(0, n);
+  //   this.kr08Detail = {
+  //     total: [230, 232, 234, 236, 238, 240, 238, 241, 243, 240, 244, 245].slice(0, n),
+  //     acquisitions: [3, 4, 3, 4, 5, 4, 5, 4, 4, 4, 5, 3].slice(0, n),
+  //     pertes: [-1, -2, -1, -2, -3, -2, -2, -2, -1, -2, -1, -2].slice(0, n),
+  //   };
+  //   this.kr23Clients = [
+  //     { name: 'Helvetia SA', pct: 11.2, cum: 11.2 }, { name: 'SwissRe', pct: 9.3, cum: 20.5 },
+  //     { name: 'Zurich Insurance', pct: 7.5, cum: 28.0 }, { name: 'Novartis', pct: 6.9, cum: 34.9 },
+  //     { name: 'Nestlé', pct: 6.0, cum: 40.9 }, { name: 'ABB', pct: 5.0, cum: 45.9 },
+  //     { name: 'Roche', pct: 4.6, cum: 50.5 }, { name: 'UBS', pct: 4.0, cum: 54.5 },
+  //     { name: 'SGS', pct: 3.5, cum: 58.0 }, { name: 'Swatch', pct: 3.0, cum: 61.0 },
+  //   ];
+  // }
 
   private generateMonthLabels(year: number): string[] {
     const short = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];

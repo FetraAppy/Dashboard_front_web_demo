@@ -138,13 +138,10 @@
     </div>
 
     <div class="card">
-      <div class="ct">KR13 — Dépassement budget frais fixes <span class="tip" data-tip="Le budget des frais fixes doit être renseigné dans Odoo (suivi annuel des employés). Dès que les montants seront saisis, le dépassement s'affichera automatiquement ici."></span>
-        
+      <div class="ct">KR13 — Dépassement budget frais fixes <span class="tip" data-tip="Frais fixes = position 6 du plan comptable (loyer, charges accessoires, nettoyage, maintenance, assurances). Aucun budget n'étant saisi dans Odoo, la référence est la moyenne glissante des 12 mois précédents. Les premiers mois sont faussés à la baisse par la reprise de bilan de décembre 2025."></span>
       </div>
-      <div class="cs">Écart en % vs budget (seuil ±5%)</div>
-      <div style="padding:24px 0;text-align:center;color:var(--text-secondary);font-size:11px;">
-        En attente de données — le budget des frais fixes n'est pas encore saisi dans Odoo
-      </div>
+      <div class="cs">Écart en % vs moyenne 12 mois — orange ±5%, rouge ±10%</div>
+      <div class="cw"><canvas id="fi-kr13"></canvas></div>
     </div>
   </div>
 

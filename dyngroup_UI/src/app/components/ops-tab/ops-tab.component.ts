@@ -87,7 +87,7 @@ export class OpsTabComponent implements OnInit, AfterViewInit, OnDestroy {
     const safetyTimeout = setTimeout(() => {
       this.loading = false;
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     }, 10000);
@@ -126,7 +126,7 @@ export class OpsTabComponent implements OnInit, AfterViewInit, OnDestroy {
       clearTimeout(safetyTimeout);
       console.error('[ops-tab]', e);
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     } finally {
@@ -176,26 +176,29 @@ export class OpsTabComponent implements OnInit, AfterViewInit, OnDestroy {
     this.kr26Months = Array.from(months).sort();
   }
 
-  private buildFallbackSeries() {
-    const n = this.maxMonths;
-    const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
-    this.labels12 = M12.slice(0, n);
-    this.kr10Series = [7, 5, 8, 4, 6, 5, 4, 6, 5, 4, 4, 4].slice(0, n);
-    this.kr18Series = [3, 4, 3, 4, 3, 2, 4, 3, 4, 3, 4, 3].slice(0, n);
-    this.kr22Series = [81, 82, 80, 83, 83, 84, 82, 83, 83, 84, 84, 84].slice(0, n);
-    this.kr25Series = [120, 140, 150, 170, 180, 200, 210, 220, 230, 240, 250, 260].slice(0, n);
-    this.kr26Series = [28, 29, 27, 30, 31, 28, 29, 30, 28, 29, 31, 30].slice(0, n);
-    this.kr27Series = [25, 22, 20, 24, 19, 18, 21, 17, 18, 16, 15, 18].slice(0, n);
-    this.kr19Series = [2, 1, 3, 2, 1, 4, 2, 1, 2, 1, 3, 1].slice(0, n);
-    this.kr26DeptRows = [
-      { dept: 'Tech & Dev', byMonth: { '2026-01': 34, '2026-02': 36, '2026-03': 33, '2026-04': 35, '2026-05': 36 }, avg: 34.8 },
-      { dept: 'Commercial', byMonth: { '2026-01': 28, '2026-02': 29, '2026-03': 27, '2026-04': 30, '2026-05': 31 }, avg: 29.0 },
-      { dept: 'Finance', byMonth: { '2026-01': 25, '2026-02': 26, '2026-03': 24, '2026-04': 27, '2026-05': 28 }, avg: 26.0 },
-      { dept: 'Ops & IT', byMonth: { '2026-01': 30, '2026-02': 31, '2026-03': 29, '2026-04': 32, '2026-05': 33 }, avg: 31.0 },
-      { dept: 'RH', byMonth: { '2026-01': 20, '2026-02': 21, '2026-03': 19, '2026-04': 22, '2026-05': 23 }, avg: 21.0 },
-    ];
-    this.kr26Months = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'];
-  }
+  // Désactivé : injectait des données mockées en dur en cas d'échec API (y compris des noms
+  // de départements fictifs) — trompeur. `error = true` suffit ; le template doit afficher
+  // un état "indisponible" plutôt que ces chiffres inventés.
+  // private buildFallbackSeries() {
+  //   const n = this.maxMonths;
+  //   const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
+  //   this.labels12 = M12.slice(0, n);
+  //   this.kr10Series = [7, 5, 8, 4, 6, 5, 4, 6, 5, 4, 4, 4].slice(0, n);
+  //   this.kr18Series = [3, 4, 3, 4, 3, 2, 4, 3, 4, 3, 4, 3].slice(0, n);
+  //   this.kr22Series = [81, 82, 80, 83, 83, 84, 82, 83, 83, 84, 84, 84].slice(0, n);
+  //   this.kr25Series = [120, 140, 150, 170, 180, 200, 210, 220, 230, 240, 250, 260].slice(0, n);
+  //   this.kr26Series = [28, 29, 27, 30, 31, 28, 29, 30, 28, 29, 31, 30].slice(0, n);
+  //   this.kr27Series = [25, 22, 20, 24, 19, 18, 21, 17, 18, 16, 15, 18].slice(0, n);
+  //   this.kr19Series = [2, 1, 3, 2, 1, 4, 2, 1, 2, 1, 3, 1].slice(0, n);
+  //   this.kr26DeptRows = [
+  //     { dept: 'Tech & Dev', byMonth: { '2026-01': 34, '2026-02': 36, '2026-03': 33, '2026-04': 35, '2026-05': 36 }, avg: 34.8 },
+  //     { dept: 'Commercial', byMonth: { '2026-01': 28, '2026-02': 29, '2026-03': 27, '2026-04': 30, '2026-05': 31 }, avg: 29.0 },
+  //     { dept: 'Finance', byMonth: { '2026-01': 25, '2026-02': 26, '2026-03': 24, '2026-04': 27, '2026-05': 28 }, avg: 26.0 },
+  //     { dept: 'Ops & IT', byMonth: { '2026-01': 30, '2026-02': 31, '2026-03': 29, '2026-04': 32, '2026-05': 33 }, avg: 31.0 },
+  //     { dept: 'RH', byMonth: { '2026-01': 20, '2026-02': 21, '2026-03': 19, '2026-04': 22, '2026-05': 23 }, avg: 21.0 },
+  //   ];
+  //   this.kr26Months = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'];
+  // }
 
   private generateMonthLabels(year: number): string[] {
     const short = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];

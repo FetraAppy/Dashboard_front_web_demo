@@ -96,12 +96,15 @@ export async function getDashboardSynthese(req: Request, res: Response) {
                 : null
         );
 
-        // Cartes KPI — dernière valeur non nulle de chaque KR
+        // Cartes KPI — dernière valeur non nulle de chaque KR.
+        // Seules les lignes agrégées sont retenues : les lignes de dimension
+        // (ex. KR13 'detail'/realise en CHF) ont une unité différente et
+        // fausseraient la carte si elles étaient sélectionnées.
         const kpiRes = await pool.query(
             `SELECT DISTINCT ON (kr_id) kr_id, actual_value, target_value, status
              FROM kpi.okr_monthly
              WHERE kr_id = ANY($1::text[])
-               AND (dimension_key = '' OR dimension_key IS NULL OR dimension_key != 'status')
+               AND (dimension_key = '' OR dimension_key IS NULL)
                AND actual_value IS NOT NULL
              ORDER BY kr_id, period_year DESC, period_month DESC`,
             [["KR07", "KR22", "KR16", "KR10", "KR13", "KR18"]]

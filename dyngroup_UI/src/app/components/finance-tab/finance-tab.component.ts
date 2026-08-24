@@ -58,6 +58,9 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
   kr24Buckets: { label: string; kchf: number }[] = [];
   kr24Avg: number | null = null;
 
+  // KR13 — Dépassement budget frais fixes (% par mois)
+  kr13Series: (number | null)[] = [];
+
   ngOnInit() {
     this.fetchData();
   }
@@ -78,7 +81,7 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     const safetyTimeout = setTimeout(() => {
       this.loading = false;
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     }, 10000);
@@ -129,7 +132,7 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       clearTimeout(safetyTimeout);
       console.error('[finance-tab]', e);
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     } finally {
@@ -155,23 +158,26 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     this.kr14Series = fill12('KR14').map(v => v !== null ? v / 1000 : null);
     this.kr11Series = fill12('KR11').map(v => v !== null ? v / 1000 : null);
     this.kr20Series = fill12('KR20');
+    this.kr13Series = fill12('KR13'); // % de dépassement (déjà en %)
   }
 
-  private buildFallbackSeries() {
-    const n = this.maxMonths;
-    const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
-    this.labels12 = M12.slice(0, n);
-    this.kr15Series = [488, 502, null, 518, 525, 540, 505, 520, 528, 535, 539, 542].slice(0, n);
-    this.kr14Series = [155, 158, 152, 162, 165, 170, 158, 165, 172, 175, 180, 187].slice(0, n);
-    this.kr11Series = [980, 1050, 920, 1100, 1180, 1250, 1080, 1150, 1200, 1220, 1240, 1240].slice(0, n);
-    this.kr20Series = [32, 30, 33, 31, 29, 28, 30, 29, 28, 29, 28, 28].slice(0, n);
-    this.kr24Buckets = [
-      { label: '< 15j', kchf: 890 }, { label: '15-30j', kchf: 320 },
-      { label: '30-45j', kchf: 145 }, { label: '45-60j', kchf: 80 },
-      { label: '> 60j', kchf: 42 },
-    ];
-    this.kr24Avg = 18;
-  }
+  // Désactivé : injectait des données financières mockées en dur en cas d'échec API — trompeur.
+  // `error = true` suffit ; le template doit afficher un état "indisponible" plutôt que ces chiffres inventés.
+  // private buildFallbackSeries() {
+  //   const n = this.maxMonths;
+  //   const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
+  //   this.labels12 = M12.slice(0, n);
+  //   this.kr15Series = [488, 502, null, 518, 525, 540, 505, 520, 528, 535, 539, 542].slice(0, n);
+  //   this.kr14Series = [155, 158, 152, 162, 165, 170, 158, 165, 172, 175, 180, 187].slice(0, n);
+  //   this.kr11Series = [980, 1050, 920, 1100, 1180, 1250, 1080, 1150, 1200, 1220, 1240, 1240].slice(0, n);
+  //   this.kr20Series = [32, 30, 33, 31, 29, 28, 30, 29, 28, 29, 28, 28].slice(0, n);
+  //   this.kr24Buckets = [
+  //     { label: '< 15j', kchf: 890 }, { label: '15-30j', kchf: 320 },
+  //     { label: '30-45j', kchf: 145 }, { label: '45-60j', kchf: 80 },
+  //     { label: '> 60j', kchf: 42 },
+  //   ];
+  //   this.kr24Avg = 18;
+  // }
 
   private generateMonthLabels(year: number): string[] {
     const short = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
@@ -311,6 +317,32 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
           scales: {
             y: { min: 0, ticks: { callback: (v: any) => v + 'j' } },
           }
+        }
+      }));
+    }
+
+    // KR13 Dépassement budget frais fixes (données réelles — kpi.okr_monthly, KR13)
+    // Valeur = % d'écart vs budget de référence ; seuils orange ±5%, rouge ±10%.
+    const el13 = document.getElementById('fi-kr13') as HTMLCanvasElement | null;
+    if (el13) {
+      const couleur = (v: number | null) =>
+        v === null ? C.gr : v >= 10 ? C.rd : v >= 5 ? '#f97316' : '#22c55e';
+      this.charts.push(new Chart(el13.getContext('2d')!, {
+        type: 'bar',
+        data: {
+          labels: this.labels12,
+          datasets: [
+            { label: 'Écart vs budget (%)', data: this.kr13Series as any,
+              backgroundColor: this.kr13Series.map(couleur) },
+            { label: 'Budget (0%)', data: Array(n).fill(0), type: 'line',
+              borderColor: C.gr, borderDash: [6, 4], borderWidth: 1.5,
+              fill: false, pointRadius: 0 } as any,
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } },
+          scales: { y: { ticks: { callback: (v: any) => v + '%' } } }
         }
       }));
     }

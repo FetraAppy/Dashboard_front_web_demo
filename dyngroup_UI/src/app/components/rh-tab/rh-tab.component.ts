@@ -78,7 +78,7 @@ export class RhTabComponent implements OnInit, AfterViewInit, OnDestroy {
     const safetyTimeout = setTimeout(() => {
       this.loading = false;
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     }, 10000);
@@ -126,7 +126,7 @@ export class RhTabComponent implements OnInit, AfterViewInit, OnDestroy {
       clearTimeout(safetyTimeout);
       console.error('[rh-tab]', e);
       this.error = true;
-      this.buildFallbackSeries();
+      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     } finally {
@@ -154,18 +154,20 @@ export class RhTabComponent implements OnInit, AfterViewInit, OnDestroy {
     this.kr06Series = fill12('KR06');
   }
 
-  private buildFallbackSeries() {
-    const n = this.maxMonths;
-    const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
-    this.labels12 = M12.slice(0, n);
-    this.kr01Entries = [];
-    this.kr06Series = [3.2, 3.5, 4.1, 4.2, 4.8, 5.0, 4.5, 4.7, 4.9, 5.1, 5.2, 5.3].slice(0, n);
-    this.kr02Detail = {
-      hs: [4.2, 3.8, 5.1, 4.5, 3.9, 4.2, 3.5, 4.0, 4.3, 3.8, 4.1, 3.9].slice(0, n),
-      vacances: [96, 88, 84, 78.4, 81.6, 76, 80, 78.4, 76, 73.6, 72, 70.4].slice(0, n),
-      solde: [400, 390, 380, 370, 360, 350, 340, 330, 320, 310, 300, 290].slice(0, n),
-    };
-  }
+  // Désactivé : injectait des données mockées en dur en cas d'échec API — trompeur.
+  // En cas d'erreur, `error = true` suffit ; le template doit afficher un état "indisponible".
+  // private buildFallbackSeries() {
+  //   const n = this.maxMonths;
+  //   const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
+  //   this.labels12 = M12.slice(0, n);
+  //   this.kr01Entries = [];
+  //   this.kr06Series = [3.2, 3.5, 4.1, 4.2, 4.8, 5.0, 4.5, 4.7, 4.9, 5.1, 5.2, 5.3].slice(0, n);
+  //   this.kr02Detail = {
+  //     hs: [4.2, 3.8, 5.1, 4.5, 3.9, 4.2, 3.5, 4.0, 4.3, 3.8, 4.1, 3.9].slice(0, n),
+  //     vacances: [96, 88, 84, 78.4, 81.6, 76, 80, 78.4, 76, 73.6, 72, 70.4].slice(0, n),
+  //     solde: [400, 390, 380, 370, 360, 350, 340, 330, 320, 310, 300, 290].slice(0, n),
+  //   };
+  // }
 
   private generateMonthLabels(year: number): string[] {
     const short = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
@@ -221,16 +223,18 @@ export class RhTabComponent implements OnInit, AfterViewInit, OnDestroy {
         });
       }
       this.charts.push(new Chart(el01.getContext('2d')!, {
-        type: hasData ? 'line' : 'bar',
+        type: 'line',
         data: {
           labels: this.labels12,
-          datasets: hasData ? [
+          datasets: [
             { label: 'Ratio Entrées/Sorties', data: ratioData as any, borderColor: C.rh, backgroundColor: 'rgba(172, 79, 198, 0.08)', fill: true, tension: 0.3, borderWidth: 2 },
             { label: 'Équilibre (1.0)', data: Array(n).fill(1), borderColor: C.gr, borderDash: [5, 5], borderWidth: 1.5, fill: false, pointRadius: 0 },
-          ] : [
-            { label: 'Recrutements', data: [1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1].slice(0, n), backgroundColor: C.rh },
-            { label: 'Départs', data: [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0].slice(0, n), backgroundColor: C.rd },
           ]
+          // Ancien mock désactivé (affiché quand !hasData) — barres "Recrutements"/"Départs" inventées :
+          // : [
+          //   { label: 'Recrutements', data: [1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1].slice(0, n), backgroundColor: C.rh },
+          //   { label: 'Départs', data: [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0].slice(0, n), backgroundColor: C.rd },
+          // ]
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } } }
       }));
