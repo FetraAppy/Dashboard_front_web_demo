@@ -279,7 +279,8 @@
                     </span>
                     <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
-                  <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td>
+                  <!-- <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td> -->
+                  <td style="text-align: right; color: var(--text-secondary);">{{ gen((filteredRealHours[i]/theoHours[i]*100)/100)  }}</td>
                 </tr>
               </ng-container>
             </tbody>
