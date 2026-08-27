@@ -40,4 +40,15 @@ export class FormatService {
     if (value === null || value === undefined || isNaN(value as number)) return '—';
     return this.format(value, 0);
   }
+
+  /** Durées en heures décimales → "203h 35mn" (au lieu d'un arrondi direct à l'heure) */
+  hoursMinutes(value: number | null | undefined): string {
+    if (value === null || value === undefined || isNaN(value as number)) return '—';
+    const sign = value < 0 ? '-' : '';
+    const totalMinutes = Math.round(Math.abs(value) * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    const hGrouped = h.toString().replace(/\B(?=(\d{3})+(?!\d))/g, "'");
+    return `${sign}${hGrouped}h ${m.toString().padStart(2, '0')}mn`;
+  }
 }

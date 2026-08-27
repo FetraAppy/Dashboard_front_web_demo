@@ -12,7 +12,17 @@
       <div class="select-wrapper">
         <select class="filter-select" [(ngModel)]="activeCollab" (change)="onFilterChange()">
           <option value="all">Tous les collaborateurs</option>
-          <option *ngFor="let name of collaboratorsList" [value]="name">{{ name }}</option>
+          <option *ngFor="let name of filteredCollaboratorsList" [value]="name">{{ name }}</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="filter-item" *ngIf="departmentsList.length > 0">
+      <span class="filter-title">🏢 DÉPARTEMENT :</span>
+      <div class="select-wrapper">
+        <select class="filter-select" [(ngModel)]="activeDepartment" (change)="onDepartmentChange()">
+          <option value="all">Tous les départements</option>
+          <option *ngFor="let dept of departmentsList" [value]="dept">{{ dept }}</option>
         </select>
       </div>
     </div>
@@ -37,16 +47,16 @@
       </div>
     </div>
 
-    <button 
-      *ngIf="activeCollab !== 'all' || activeYear !== '2026' || activeMonth !== 'all'"
-      class="clear-filter-btn" 
+    <button
+      *ngIf="activeCollab !== 'all' || activeDepartment !== 'all' || activeYear !== '2026' || activeMonth !== 'all'"
+      class="clear-filter-btn"
       (click)="resetFilters()"
       title="Réinitialiser les filtres"
       style="margin-left: auto;"
     >
       Réinitialiser
     </button>
-    <span *ngIf="activeCollab === 'all' && activeYear === '2026' && activeMonth === 'all'" style="margin-left: auto; font-size: 10px; color: var(--text-muted); font-weight: 600;">
+    <span *ngIf="activeCollab === 'all' && activeDepartment === 'all' && activeYear === '2026' && activeMonth === 'all'" style="margin-left: auto; font-size: 10px; color: var(--text-muted); font-weight: 600;">
       Filtres par défaut
     </span>
   </div>
@@ -137,7 +147,7 @@
           </span>
         </div>
         <div class="kpi-trend trend-neu">
-          <span *ngIf="totalFactHours > 0">H. fact. {{ formatNumber(totalFactHours) }} / (H. théoriques {{ formatNumber(totalTheoHours) }} − absences {{ formatNumber(totalAbsences) }})</span>
+          <span *ngIf="totalFactHours > 0">H. fact. {{ formatHours(totalFactHours) }} / (H. théoriques {{ formatHours(totalTheoHours) }} − absences {{ formatHours(totalAbsences) }})</span>
           <span *ngIf="totalFactHours === 0">En attente de données</span>
         </div>
       </div>
@@ -158,12 +168,12 @@
 
       <div class="card">
         <div class="chart-title">Répartition annuelle</div>
-        <div class="chart-subtitle">Allocation théorique du temps sur {{ formatNumber(heuresTheoAnnuelles) }} heures globales</div>
+        <div class="chart-subtitle">Allocation théorique du temps sur {{ formatHours(heuresTheoAnnuelles) }} globales</div>
         <div class="chart-container" style="height: 220px;">
           <canvas #chDonutCanvas></canvas>
         </div>
         <div style="margin-top: 12px; font-size: 11px; text-align: center; color: var(--text-secondary);">
-          {{ formatNumber(heuresTheoAnnuelles) }}h annuelles · <strong>{{ formatNumber(heuresFactPotentielles) }}h facturables potentielles</strong>
+          {{ formatHours(heuresTheoAnnuelles) }} annuelles · <strong>{{ formatHours(heuresFactPotentielles) }} facturables potentielles</strong>
         </div>
       </div>
     </div>
@@ -186,15 +196,15 @@
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 16px;">
         <div>
           <div class="st"><span class="st-l">Tarif horaire moyen</span><span class="st-v">{{ formatNumber(tarifHoraire) }} {{ devise }}/h</span></div>
-          <div class="st"><span class="st-l">H. théoriques annuelles</span><span class="st-v">{{ formatNumber(heuresTheoAnnuelles) }}h</span></div>
+          <div class="st"><span class="st-l">H. théoriques annuelles</span><span class="st-v">{{ formatHours(heuresTheoAnnuelles) }}</span></div>
         </div>
         <div>
-          <div class="st"><span class="st-l">H. productives (hors fériés)</span><span class="st-v">{{ formatNumber(heuresProductives) }}h</span></div>
-          <div class="st"><span class="st-l">H. facturables potentielles</span><span class="st-v">{{ formatNumber(heuresFactPotentielles) }}h</span></div>
+          <div class="st"><span class="st-l">H. productives (hors fériés)</span><span class="st-v">{{ formatHours(heuresProductives) }}</span></div>
+          <div class="st"><span class="st-l">H. facturables potentielles</span><span class="st-v">{{ formatHours(heuresFactPotentielles) }}</span></div>
         </div>
         <div>
-          <div class="st"><span class="st-l">Solde vacances</span><span class="st-v">{{ formatNumber(soldeVacances) }}h = {{ gen(soldeVacances / 8) }}j</span></div>
-          <div class="st"><span class="st-l">Jours fériés calculés</span><span class="st-v">{{ formatNumber(joursFeriesCalcules) }}h = {{ gen(joursFeriesCalcules / 8) }}j</span></div>
+          <div class="st"><span class="st-l">Solde vacances</span><span class="st-v">{{ formatHours(soldeVacances) }} = {{ gen(soldeVacances / 8) }}j</span></div>
+          <div class="st"><span class="st-l">Jours fériés calculés</span><span class="st-v">{{ formatHours(joursFeriesCalcules) }} = {{ gen(joursFeriesCalcules / 8) }}j</span></div>
         </div>
         <div>
           <div class="st"><span class="st-l">CA budget annuel</span><span class="st-v">{{ caBudgetAnnuel > 0 ? formatNumber(caBudgetAnnuel) + ' ' + devise : '—' }}</span></div>
@@ -220,8 +230,10 @@
                 <th style="text-align: right;">H. théoriques</th>
                 <th style="text-align: right;">H. réalisées</th>
                 <th style="text-align: right;">Taux effort</th>
-                <th style="text-align: right;">Jours fériés</th>
-                <th style="text-align: right;">CA Budget (CHF)</th>
+                <!-- <th style="text-align: right;">Jours fériés</th> désactivé — jours fériés retirés du calcul -->
+                <!-- <th style="text-align: right;">CA Budget (CHF)</th> désactivé sur demande -->
+                <th style="text-align: right;">H. Productivité</th>
+                <th style="text-align: right;">Taux Productivité</th>
                 <th style="text-align: right;">ETP</th>
               </tr>
             </thead>
@@ -230,18 +242,18 @@
                 <tr *ngIf="(activeMonth === 'all' || activeMonth === i.toString()) && i <= maxMonthIndex">
                   <td><strong>{{ m }}</strong></td>
                   <td style="text-align: right; width: 140px;">
-                    {{ formatNumber(theoHours[i]) }}h
+                    {{ formatHours(theoHours[i]) }}
                     <div class="pbg"><div class="pf pf-b" [style.width.%]="(theoHours[i]/baseMax)*100"></div></div>
                   </td>
                   <td style="text-align: right; width: 140px;">
                     <span *ngIf="filteredRealHours[i] > 0">
-                      {{ formatNumber(filteredRealHours[i]) }}h
+                      {{ formatHours(filteredRealHours[i]) }}
                       <div class="pbg"><div class="pf pf-g" [style.width.%]="mathMin(100, (filteredRealHours[i]/theoHours[i])*100)"></div></div>
                     </span>
                     <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
                   <td style="text-align: right;">
-                    <span *ngIf="filteredRealHours[i] > 0" class="bdg" 
+                    <span *ngIf="filteredRealHours[i] > 0" class="bdg"
                           [class.bdg-pos]="(filteredRealHours[i]/theoHours[i]*100) >= 95"
                           [class.bdg-neu]="(filteredRealHours[i]/theoHours[i]*100) >= 85 && (filteredRealHours[i]/theoHours[i]*100) < 95"
                           [class.bdg-neg]="(filteredRealHours[i]/theoHours[i]*100) < 85">
@@ -249,26 +261,44 @@
                     </span>
                     <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
-                  <td style="text-align: right;">
-                    <span *ngIf="ferieHours[i] > 0" class="bdg bdg-k">{{ formatNumber(ferieHours[i]) }}h</span>
+                  <!-- <td style="text-align: right;">
+                    <span *ngIf="ferieHours[i] > 0" class="bdg bdg-k">{{ formatHours(ferieHours[i]) }}</span>
                     <span *ngIf="ferieHours[i] === 0" class="bdg bdg-gr">—</span>
+                  </td> désactivé — jours fériés retirés du calcul -->
+                  <!-- <td style="text-align: right; font-weight: 600;">{{ caBudget[i] > 0 ? formatNumber(caBudget[i]) : '—' }}</td> désactivé sur demande -->
+                  <td style="text-align: right;">
+                    <span *ngIf="filteredBillableHours[i] > 0">{{ formatHours(filteredBillableHours[i]) }}</span>
+                    <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
-                  <td style="text-align: right; font-weight: 600;">{{ caBudget[i] > 0 ? formatNumber(caBudget[i]) : '—' }}</td>
-                  <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpValue) }}</td>
+                  <td style="text-align: right;">
+                    <span *ngIf="filteredBillableHours[i] > 0" class="bdg"
+                          [class.bdg-pos]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) >= kpiObjectifProductivite"
+                          [class.bdg-neu]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) >= kpiObjectifProductivite * 0.93 && (filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) < kpiObjectifProductivite"
+                          [class.bdg-neg]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) < kpiObjectifProductivite * 0.93">
+                      {{ gen(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) }}%
+                    </span>
+                    <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
+                  </td>
+                  <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td>
                 </tr>
               </ng-container>
             </tbody>
             <tfoot>
               <tr style="font-weight: 700; background: var(--th-bg);">
                 <td>Total / Moy.</td>
-                <td style="text-align: right;">{{ formatNumber(totalTheoHours) }}h</td>
-                <td style="text-align: right;">{{ totalRealHours > 0 ? formatNumber(totalRealHours) + 'h' : '—' }}</td>
+                <td style="text-align: right;">{{ formatHours(totalTheoHours) }}</td>
+                <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
                 <td style="text-align: right;">
                   <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
                   <span *ngIf="totalRealHours === 0">—</span>
                 </td>
-                <td style="text-align: right;">{{ formatNumber(totalFeriesHours) }}h</td>
-                <td style="text-align: right;">{{ formatNumber(totalCaBudget) }}</td>
+                <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
+                <!-- <td style="text-align: right;">{{ formatNumber(totalCaBudget) }}</td> désactivé sur demande -->
+                <td style="text-align: right;">{{ totalFactHours > 0 ? formatHours(totalFactHours) : '—' }}</td>
+                <td style="text-align: right;">
+                  <span *ngIf="totalFactHours > 0">{{ gen(kpiObjectifProductivite) }}%</span>
+                  <span *ngIf="totalFactHours === 0">—</span>
+                </td>
                 <td style="text-align: right;">{{ gen(etpValue) }}</td>
               </tr>
             </tfoot>
@@ -278,9 +308,10 @@
 
       <!-- Column side: Objectifs & non-fact charts -->
       <div style="display: flex; flex-direction: column; gap: 20px;">
-        <!-- Objectifs 2026 -->
+        <!-- Objectifs de productivité — générés depuis refAnnuelleH (référence réelle de
+             l'année sélectionnée) × seuilsProductivite, plus plus de valeurs figées -->
         <div class="card">
-          <div class="chart-title">Objectifs de productivité 2026</div>
+          <div class="chart-title">Objectifs de productivité {{ activeYear }}</div>
           <div class="table-wrapper" style="margin-top: 8px;">
             <table class="data-table ot">
               <thead>
@@ -293,40 +324,12 @@
                 </tr>
               </thead>
               <tbody>
-                <tr class="hl">
-                  <td>🎯 Seuil</td>
-                  <td style="text-align: right;">—</td>
-                  <td style="text-align: right;">1 272</td>
-                  <td style="text-align: right;">—</td>
-                  <td style="text-align: right;">69.1%</td>
-                </tr>
-                <tr>
-                  <td>Niveau 0.5</td>
-                  <td style="text-align: right;">1 273</td>
-                  <td style="text-align: right;">1 339</td>
-                  <td style="text-align: right;">69.2%</td>
-                  <td style="text-align: right;">72.8%</td>
-                </tr>
-                <tr>
-                  <td>Niveau 1</td>
-                  <td style="text-align: right;">1 340</td>
-                  <td style="text-align: right;">1 406</td>
-                  <td style="text-align: right;">72.8%</td>
-                  <td style="text-align: right;">76.4%</td>
-                </tr>
-                <tr>
-                  <td>Niveau 1.5</td>
-                  <td style="text-align: right;">1 407</td>
-                  <td style="text-align: right;">1 512</td>
-                  <td style="text-align: right;">76.5%</td>
-                  <td style="text-align: right;">82.2%</td>
-                </tr>
-                <tr>
-                  <td>Niveau 2+</td>
-                  <td style="text-align: right;">1 513+</td>
-                  <td style="text-align: right;">—</td>
-                  <td style="text-align: right;">82.2%</td>
-                  <td style="text-align: right;">—</td>
+                <tr *ngFor="let niv of objectifsProductivite" [class.hl]="niv.hMin === null">
+                  <td>{{ niv.niveau }}</td>
+                  <td style="text-align: right;">{{ niv.hMin !== null ? formatNumber(niv.hMin) : '—' }}</td>
+                  <td style="text-align: right;">{{ niv.hMax !== null ? formatNumber(niv.hMax) : (niv.hMin !== null ? formatNumber(niv.hMin) + '+' : '—') }}</td>
+                  <td style="text-align: right;">{{ niv.prod1 !== null ? gen(niv.prod1) + '%' : '—' }}</td>
+                  <td style="text-align: right;">{{ niv.prod2 !== null ? gen(niv.prod2) + '%' : '—' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -369,24 +372,25 @@
               <tr *ngIf="(activeMonth === 'all' || activeMonth === i.toString()) && i <= maxMonthIndex">
                 <td><strong>{{ m }}</strong></td>
                 <td style="text-align: right;">
-                  <span *ngIf="filteredRealHours[i] > 0" class="bdg" 
-                        [class.bdg-pos]="(filteredRealHours[i] - (theoHours[i] - ferieHours[i])) >= 0"
-                        [class.bdg-neg]="(filteredRealHours[i] - (theoHours[i] - ferieHours[i])) < 0">
-                    {{ (filteredRealHours[i] - (theoHours[i] - ferieHours[i])) >= 0 ? '+' : '' }}{{ formatNumber(filteredRealHours[i] - (theoHours[i] - ferieHours[i])) }}h
+                  <!-- Avant : (filteredRealHours[i] - (theoHours[i] - ferieHours[i])) — désactivé, jours fériés retirés du calcul -->
+                  <span *ngIf="filteredRealHours[i] > 0" class="bdg"
+                        [class.bdg-pos]="(filteredRealHours[i] - theoHours[i]) >= 0"
+                        [class.bdg-neg]="(filteredRealHours[i] - theoHours[i]) < 0">
+                    {{ (filteredRealHours[i] - theoHours[i]) >= 0 ? '+' : '' }}{{ formatHours(filteredRealHours[i] - theoHours[i]) }}
                   </span>
                   <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
-                  <span *ngIf="vacationsMonth[i] > 0" class="bdg bdg-k">{{ formatNumber(vacationsMonth[i]) }}h</span>
+                  <span *ngIf="vacationsMonth[i] > 0" class="bdg bdg-k">{{ formatHours(vacationsMonth[i]) }}</span>
                   <span *ngIf="vacationsMonth[i] === 0" class="bdg bdg-gr">—</span>
                 </td>
                 <td style="text-align: right; font-weight: 700;">
                   <span [style.color]="vacationsBalance[i] < 0 ? '#dc2626' : (vacationsBalance[i] < 40 ? '#ca8a04' : '#16a34a')">
-                    {{ formatNumber(vacationsBalance[i]) }}h
+                    {{ formatHours(vacationsBalance[i]) }}
                   </span>
                 </td>
                 <td style="text-align: right;">
-                  <span *ngIf="absencesMonth[i] > 0">{{ formatNumber(absencesMonth[i]) }}h</span>
+                  <span *ngIf="absencesMonth[i] > 0">{{ formatHours(absencesMonth[i]) }}</span>
                   <span *ngIf="absencesMonth[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
               </tr>
@@ -396,20 +400,22 @@
             <tr style="font-weight: 700; background: var(--th-bg);">
               <td>Total / Période</td>
               <td style="text-align: right;">
-                <span *ngIf="totalRealHours > 0">{{ totalVarHours >= 0 ? '+' : '' }}{{ formatNumber(totalVarHours) }}h</span>
+                <span *ngIf="totalRealHours > 0">{{ totalVarHours >= 0 ? '+' : '' }}{{ formatHours(totalVarHours) }}</span>
                 <span *ngIf="totalRealHours === 0">—</span>
               </td>
-              <td style="text-align: right;">{{ formatNumber(totalVacPris) }}h</td>
-              <td style="text-align: right;">{{ formatNumber(finalVacBalance) }}h</td>
-              <td style="text-align: right;">{{ formatNumber(totalAbsences) }}h</td>
+              <td style="text-align: right;">{{ formatHours(totalVacPris) }}</td>
+              <td style="text-align: right;">{{ formatHours(finalVacBalance) }}</td>
+              <td style="text-align: right;">{{ formatHours(totalAbsences) }}</td>
             </tr>
           </tfoot>
         </table>
       </div>
     </div>
 
-    <!-- Tableau Productivité -->
-    <div class="card" style="margin-bottom: 24px;">
+    <!-- Tableau Productivité — désactivé sur demande. *ngIf="false" plutôt qu'un
+         commentaire HTML classique : le bloc contient déjà des commentaires imbriqués
+         (fériés), qu'un commentaire englobant casserait. Code conservé intact ci-dessous. -->
+    <div class="card" style="margin-bottom: 24px;" *ngIf="false">
       <div class="chart-title">Suivi productivité mensuelle</div>
       <div class="chart-subtitle">Comparatif heures nettes vs facturables vs productivité calculée</div>
       
@@ -419,7 +425,7 @@
             <tr>
               <th>Mois</th>
               <th style="text-align: right;">H. théoriques</th>
-              <th style="text-align: right;">Férié</th>
+              <!-- <th style="text-align: right;">Férié</th> désactivé — jours fériés retirés du calcul -->
               <th style="text-align: right;">H. réalisées</th>
               <th style="text-align: right;">Taux effectif</th>
               <th style="text-align: right;">H. facturables</th>
@@ -431,22 +437,22 @@
               <tr *ngIf="(activeMonth === 'all' || activeMonth === i.toString()) && i <= maxMonthIndex">
                 <td><strong>{{ m }}</strong></td>
                 <td style="text-align: right; width: 140px;">
-                  {{ formatNumber(theoHours[i]) }}h
+                  {{ formatHours(theoHours[i]) }}
                   <div class="pbg"><div class="pf pf-b" [style.width.%]="(theoHours[i]/baseMax)*100"></div></div>
                 </td>
-                <td style="text-align: right;">
-                  <span *ngIf="ferieHours[i] > 0" class="bdg bdg-k">{{ formatNumber(ferieHours[i]) }}h</span>
+                <!-- <td style="text-align: right;">
+                  <span *ngIf="ferieHours[i] > 0" class="bdg bdg-k">{{ formatHours(ferieHours[i]) }}</span>
                   <span *ngIf="ferieHours[i] === 0" class="bdg bdg-gr">—</span>
-                </td>
+                </td> désactivé — jours fériés retirés du calcul -->
                 <td style="text-align: right; width: 140px;">
                   <span *ngIf="filteredRealHours[i] > 0">
-                    {{ formatNumber(filteredRealHours[i]) }}h
+                    {{ formatHours(filteredRealHours[i]) }}
                     <div class="pbg"><div class="pf pf-g" [style.width.%]="mathMin(100, (filteredRealHours[i]/theoHours[i])*100)"></div></div>
                   </span>
                   <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
-                  <span *ngIf="filteredRealHours[i] > 0" class="bdg" 
+                  <span *ngIf="filteredRealHours[i] > 0" class="bdg"
                         [class.bdg-pos]="(filteredRealHours[i]/theoHours[i]*100) >= 95"
                         [class.bdg-neu]="(filteredRealHours[i]/theoHours[i]*100) >= 85 && (filteredRealHours[i]/theoHours[i]*100) < 95"
                         [class.bdg-neg]="(filteredRealHours[i]/theoHours[i]*100) < 85">
@@ -455,7 +461,7 @@
                   <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
-                  <span *ngIf="filteredBillableHours[i] > 0">{{ gen(filteredBillableHours[i]) }}h</span>
+                  <span *ngIf="filteredBillableHours[i] > 0">{{ formatHours(filteredBillableHours[i]) }}</span>
                   <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
@@ -473,14 +479,14 @@
           <tfoot>
             <tr style="font-weight: 700; background: var(--th-bg);">
               <td>Total / Moy.</td>
-              <td style="text-align: right;">{{ formatNumber(totalTheoHours) }}h</td>
-              <td style="text-align: right;">{{ formatNumber(totalFeriesHours) }}h</td>
-              <td style="text-align: right;">{{ totalRealHours > 0 ? formatNumber(totalRealHours) + 'h' : '—' }}</td>
+              <td style="text-align: right;">{{ formatHours(totalTheoHours) }}</td>
+              <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
+              <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
               <td style="text-align: right;">
                 <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
                 <span *ngIf="totalRealHours === 0">—</span>
               </td>
-              <td style="text-align: right;">{{ totalFactHours > 0 ? formatNumber(totalFactHours) + 'h' : '—' }}</td>
+              <td style="text-align: right;">{{ totalFactHours > 0 ? formatHours(totalFactHours) : '—' }}</td>
               <td style="text-align: right;">
                 <span *ngIf="totalFactHours > 0">{{ gen(kpiObjectifProductivite) }}%</span>
                 <span *ngIf="totalFactHours === 0">—</span>

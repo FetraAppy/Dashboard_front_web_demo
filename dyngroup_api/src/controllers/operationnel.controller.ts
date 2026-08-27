@@ -44,7 +44,12 @@ function isWeekend(d: Date): boolean {
     return dow === 0 || dow === 6;
 }
 
-function computeVaudHolidays(year: number): { parMois: number[]; totalHeures: number } {
+/**
+ * Dates des jours fériés vaudois d'une année, filtrées week-ends et dates futures.
+ * Base commune pour computeVaudHolidays (référence 1 personne) et
+ * computeTheoMensuelEmployee (prorata réel par employé).
+ */
+function getVaudHolidayDates(year: number): Date[] {
     const paques = computEaster(year);
     const now = new Date();
 
@@ -60,13 +65,15 @@ function computeVaudHolidays(year: number): { parMois: number[]; totalHeures: nu
         new Date(year, 11, 25),       // Noël
     ];
 
+    return holidays.filter(h => !isWeekend(h) && h <= now);
+}
+
+function computeVaudHolidays(year: number): { parMois: number[]; totalHeures: number } {
+    const holidays = getVaudHolidayDates(year);
     const parMois = Array<number>(12).fill(0);
     let totalHeures = 0;
 
     for (const h of holidays) {
-        if (isWeekend(h)) continue;
-        // Only count holidays up to today (past dates for past years included)
-        if (h > now) continue;
         parMois[h.getMonth()] += 8;
         totalHeures += 8;
     }
@@ -104,13 +111,18 @@ function computeMonthlyTheo(year: number, feriesParMois: number[]): { parMois: n
 
 /**
  * Heures théoriques mensuelles par employé :
- * resource_calendar.hours_per_day × jours ouvrés (lun–ven),
+ * resource_calendar.hours_per_day × (jours ouvrés lun–ven − jours fériés vaudois),
  * avec prorata d'arrivée (first_contract_date) et de départ (departure_date),
  * et cutoff à la date du jour (mois courant / mois futurs).
+ * Les fériés ne sont déduits que s'ils tombent dans la fenêtre où l'employé est
+ * effectivement sous contrat ce mois-là (pas de déduction avant l'embauche/après le
+ * départ) — contrairement à l'ancien calcul global qui appliquait un forfait plat
+ * (8h × effectif brut) sans tenir compte du temps partiel ni des entrées/sorties.
  */
 function computeTheoMensuelEmployee(
     emp: { hours_per_day: string | number | null; first_contract_date: string | null; departure_date: string | null },
-    year: number
+    year: number,
+    holidayDates: Date[]
 ): number[] {
     const hpd = parseFloat(String(emp.hours_per_day ?? '')) || 8;
     const now = new Date();
@@ -145,7 +157,8 @@ function computeTheoMensuelEmployee(
             const dow = d.getDay();
             if (dow !== 0 && dow !== 6) workingDays++;
         }
-        parMois[m] = Math.round(workingDays * hpd * 100) / 100;
+        const feriesDansFenetre = holidayDates.filter(h => h >= from && h <= to).length;
+        parMois[m] = Math.round((workingDays - feriesDansFenetre) * hpd * 100) / 100;
     }
 
     return parMois;
@@ -154,6 +167,7 @@ function computeTheoMensuelEmployee(
 export async function getDashboardData(req: Request, res: Response) {
     try {
         const annee = parseInt(req.query.annee as string) || 2026;
+        const holidayDates = getVaudHolidayDates(annee);
 
         // 1 & 2. Query synthesis params and active employees in parallel (independent queries)
         const [syntheseRes, employeesRes] = await Promise.all([
@@ -165,10 +179,13 @@ export async function getDashboardData(req: Request, res: Response) {
                 `SELECT DISTINCT emp.id, emp.name,
                         rc.hours_per_day,
                         emp.first_contract_date,
-                        emp.departure_date
+                        emp.departure_date,
+                        emp.department_id,
+                        dept.name AS department_name
                  FROM kpi.operationnel_suivi_mensuel osm
                  JOIN staging.hr_employee emp ON osm.employee_id = emp.id
                  LEFT JOIN staging.resource_calendar rc ON emp.resource_calendar_id = rc.id
+                 LEFT JOIN staging.hr_department dept ON dept.id = emp.department_id
                  WHERE osm.annee = $1
                  ORDER BY emp.name`,
                 [annee]
@@ -282,7 +299,12 @@ export async function getDashboardData(req: Request, res: Response) {
             // Table may not have the field yet
         }
 
-        // Query ETP from active contract × resource_calendar
+        // Query ETP (taux d'activité individuel, ex. 0.8 pour un 80%) depuis le contrat actif.
+        // DISTINCT ON sans second critère de tri était non-déterministe : si un employé a
+        // plusieurs lignes hr_contract à l'état 'open', Postgres pouvait piocher n'importe
+        // laquelle selon le plan d'exécution → ETP individuel incohérent d'une exécution à
+        // l'autre (cas rapporté : BARBEN Thibaut). Ajout de `date_start DESC` pour retenir
+        // systématiquement le contrat le plus récent.
         const empEtpMap: Record<number, number> = {};
         try {
             const etpRes = await pool.query(
@@ -292,7 +314,7 @@ export async function getDashboardData(req: Request, res: Response) {
                  FROM staging.hr_contract c
                  LEFT JOIN staging.resource_calendar rc ON c.resource_calendar_id = rc.id
                  WHERE (c.state IS NULL OR c.state = 'open')
-                 ORDER BY c.employee_id`
+                 ORDER BY c.employee_id, c.date_start::date DESC NULLS LAST`
             );
             etpRes.rows.forEach(r => {
                 empEtpMap[r.employee_id] = parseFloat(r.etp) || 1;
@@ -314,7 +336,7 @@ export async function getDashboardData(req: Request, res: Response) {
                 real: Array(12).fill(0),
                 ca_real: Array(12).fill(0),
                 billable: Array(12).fill(0),
-                theo: computeTheoMensuelEmployee(emp, annee),
+                theo: computeTheoMensuelEmployee(emp, annee, holidayDates),
                 ca_bud: Array(12).fill(monthlyBudget),
                 ca_budget_annuel: annualBudget,
                 vac_m: Array(12).fill(0),
@@ -323,9 +345,15 @@ export async function getDashboardData(req: Request, res: Response) {
                 vac_init: vacInitH,
                 non_fact: { admin: 0, vacances: 0, rh_it: 0, marketing: 0, formation: 0, maladie: 0 },
                 tarif_moyen: empTarifMap[emp.id] || empPriceMap[emp.id] || parseFloat(synthese.tarif_horaire_chf) || 180,
-                etp: empEtpMap[emp.id] || 1
+                etp: empEtpMap[emp.id] || 1,
+                department: emp.department_name || null
             };
         });
+
+        // Liste des départements présents, pour peupler le filtre côté frontend
+        const departments = Array.from(
+            new Set(employees.map(emp => emp.department_name).filter((d): d is string => !!d))
+        ).sort();
 
         // 3-8. Run the 7 independent queries (tracking, billable, vacations, illnesses, absences, non-facturable, repartition) in parallel
         const [trackingRes, billableRes, vacRes, malRes, absRes, nonFactRes, repartitionRes] = await Promise.all([
@@ -352,52 +380,86 @@ export async function getDashboardData(req: Request, res: Response) {
                 [annee]
             ),
             // 5. Vacations from hr_leave (holiday_status_id = 1)
+            // Réparties jour par jour (jours ouvrés uniquement) entre date_from et date_to,
+            // au lieu de tout compter sur le mois de date_from — un congé du 20/06 au 05/07
+            // comptait auparavant ses 15 jours entièrement en juin, 0 en juillet.
             pool.query(
-                `SELECT 
-                   employee_id,
-                   EXTRACT(MONTH FROM date_from::timestamp)::int as mois,
-                   SUM(number_of_hours) as hours
-                 FROM staging.hr_leave
-                 WHERE date_from IS NOT NULL 
-                   AND date_from <> ''
-                   AND date_from <> 'False'
-                   AND EXTRACT(YEAR FROM date_from::timestamp)::int = $1
-                   AND state = 'validate'
-                   AND holiday_status_id = 1
-                 GROUP BY employee_id, mois`,
+                `WITH leave_days AS (
+                     SELECT hl.id AS leave_id, hl.employee_id, hl.number_of_hours,
+                            gs.day::date AS day
+                     FROM staging.hr_leave hl
+                     CROSS JOIN LATERAL generate_series(hl.date_from::date, hl.date_to::date, '1 day'::interval) AS gs(day)
+                     WHERE hl.date_from IS NOT NULL AND hl.date_from <> '' AND hl.date_from <> 'False'
+                       AND hl.date_to IS NOT NULL AND hl.date_to <> '' AND hl.date_to <> 'False'
+                       AND hl.state = 'validate'
+                       AND hl.holiday_status_id = 1
+                       AND EXTRACT(DOW FROM gs.day) NOT IN (0, 6)
+                 ),
+                 leave_span AS (
+                     SELECT leave_id, number_of_hours, COUNT(*) AS nb_jours_ouvres
+                     FROM leave_days GROUP BY leave_id, number_of_hours
+                 )
+                 SELECT ld.employee_id,
+                        EXTRACT(MONTH FROM ld.day)::int AS mois,
+                        SUM(ls.number_of_hours / NULLIF(ls.nb_jours_ouvres, 0)) AS hours
+                 FROM leave_days ld
+                 JOIN leave_span ls ON ls.leave_id = ld.leave_id
+                 WHERE EXTRACT(YEAR FROM ld.day)::int = $1
+                 GROUP BY ld.employee_id, EXTRACT(MONTH FROM ld.day)::int`,
                 [annee]
             ),
-            // 6. Illnesses from hr_leave (holiday_status_id = 7, 8, 14)
+            // 6. Illnesses from hr_leave (holiday_status_id = 7, 8, 14) — même répartition jour par jour
             pool.query(
-                `SELECT 
-                   employee_id,
-                   EXTRACT(MONTH FROM date_from::timestamp)::int as mois,
-                   SUM(number_of_hours) as hours
-                 FROM staging.hr_leave
-                 WHERE date_from IS NOT NULL 
-                   AND date_from <> ''
-                   AND date_from <> 'False'
-                   AND EXTRACT(YEAR FROM date_from::timestamp)::int = $1
-                   AND state = 'validate'
-                   AND holiday_status_id IN (7, 8, 14)
-                 GROUP BY employee_id, mois`,
+                `WITH leave_days AS (
+                     SELECT hl.id AS leave_id, hl.employee_id, hl.number_of_hours,
+                            gs.day::date AS day
+                     FROM staging.hr_leave hl
+                     CROSS JOIN LATERAL generate_series(hl.date_from::date, hl.date_to::date, '1 day'::interval) AS gs(day)
+                     WHERE hl.date_from IS NOT NULL AND hl.date_from <> '' AND hl.date_from <> 'False'
+                       AND hl.date_to IS NOT NULL AND hl.date_to <> '' AND hl.date_to <> 'False'
+                       AND hl.state = 'validate'
+                       AND hl.holiday_status_id IN (7, 8, 14)
+                       AND EXTRACT(DOW FROM gs.day) NOT IN (0, 6)
+                 ),
+                 leave_span AS (
+                     SELECT leave_id, number_of_hours, COUNT(*) AS nb_jours_ouvres
+                     FROM leave_days GROUP BY leave_id, number_of_hours
+                 )
+                 SELECT ld.employee_id,
+                        EXTRACT(MONTH FROM ld.day)::int AS mois,
+                        SUM(ls.number_of_hours / NULLIF(ls.nb_jours_ouvres, 0)) AS hours
+                 FROM leave_days ld
+                 JOIN leave_span ls ON ls.leave_id = ld.leave_id
+                 WHERE EXTRACT(YEAR FROM ld.day)::int = $1
+                 GROUP BY ld.employee_id, EXTRACT(MONTH FROM ld.day)::int`,
                 [annee]
             ),
             // 7. Absences from hr_leave joined to hr_leave_type (types sélectionnés dynamiquement, pas d'ids codés)
+            // Même répartition jour par jour que vacances/maladie.
             pool.query(
-                `SELECT
-                   hl.employee_id,
-                   EXTRACT(MONTH FROM hl.date_from::timestamp)::int as mois,
-                   SUM(hl.number_of_hours) as hours
-                 FROM staging.hr_leave hl
-                 JOIN staging.hr_leave_type hlt ON hl.holiday_status_id = hlt.id
-                 WHERE hl.date_from IS NOT NULL
-                   AND hl.date_from <> ''
-                   AND hl.date_from <> 'False'
-                   AND EXTRACT(YEAR FROM hl.date_from::timestamp)::int = $1
-                   AND hl.state = 'validate'
-                   AND hlt.time_type = 'leave'
-                 GROUP BY hl.employee_id, mois`,
+                `WITH leave_days AS (
+                     SELECT hl.id AS leave_id, hl.employee_id, hl.number_of_hours,
+                            gs.day::date AS day
+                     FROM staging.hr_leave hl
+                     JOIN staging.hr_leave_type hlt ON hl.holiday_status_id = hlt.id
+                     CROSS JOIN LATERAL generate_series(hl.date_from::date, hl.date_to::date, '1 day'::interval) AS gs(day)
+                     WHERE hl.date_from IS NOT NULL AND hl.date_from <> '' AND hl.date_from <> 'False'
+                       AND hl.date_to IS NOT NULL AND hl.date_to <> '' AND hl.date_to <> 'False'
+                       AND hl.state = 'validate'
+                       AND hlt.time_type = 'leave'
+                       AND EXTRACT(DOW FROM gs.day) NOT IN (0, 6)
+                 ),
+                 leave_span AS (
+                     SELECT leave_id, number_of_hours, COUNT(*) AS nb_jours_ouvres
+                     FROM leave_days GROUP BY leave_id, number_of_hours
+                 )
+                 SELECT ld.employee_id,
+                        EXTRACT(MONTH FROM ld.day)::int AS mois,
+                        SUM(ls.number_of_hours / NULLIF(ls.nb_jours_ouvres, 0)) AS hours
+                 FROM leave_days ld
+                 JOIN leave_span ls ON ls.leave_id = ld.leave_id
+                 WHERE EXTRACT(YEAR FROM ld.day)::int = $1
+                 GROUP BY ld.employee_id, EXTRACT(MONTH FROM ld.day)::int`,
                 [annee]
             ),
             // 8. Non-facturable categories breakdown from account_analytic_line
@@ -518,6 +580,8 @@ export async function getDashboardData(req: Request, res: Response) {
 
         // Compute holidays & theoretical hours for the year
         const feries = computeVaudHolidays(annee);
+        // Référence 1 employé plein temps (8h/j, jours ouvrés − fériés) — dénominateur de l'ETP
+        const refTheo = computeMonthlyTheo(annee, feries.parMois);
 
         // Heures théoriques globales = somme des heures théoriques par employé (calendrier + prorata)
         const theoMensuel = { parMois: Array(12).fill(0) as number[], totalAnnuel: 0 };
@@ -528,21 +592,33 @@ export async function getDashboardData(req: Request, res: Response) {
             });
         });
         if (theoMensuel.totalAnnuel === 0) {
-            // Fallback : aucun employé avec données → heurs théoriques théoriques globales (jours ouvrés × 8h − fériés)
-            const fb = computeMonthlyTheo(annee, feries.parMois);
-            theoMensuel.parMois = fb.parMois;
-            theoMensuel.totalAnnuel = fb.totalAnnuel;
+            // Fallback : aucun employé avec données → heures théoriques globales (jours ouvrés × 8h − fériés)
+            theoMensuel.parMois = [...refTheo.parMois];
+            theoMensuel.totalAnnuel = refTheo.totalAnnuel;
         }
+
+        // ETP mensuel = Σ H.théoriques employés (déjà net fériés, prorata embauche/départ)
+        // ÷ H.théorique d'1 employé plein temps référence (net fériés) — remplace l'ancienne
+        // somme de ratios de contrat (empEtpMap), qui ignorait totalement les dates
+        // d'embauche/départ et comptait un employé arrivé en cours d'année comme présent
+        // toute l'année (cas BARBEN Thibaut).
+        const etpMensuel = theoMensuel.parMois.map((v, i) => refTheo.parMois[i] > 0 ? v / refTheo.parMois[i] : 0);
 
         res.json({
             collab,
+            departments,
             global: {
                 theo: monthlyTheo,
                 ca_bud: monthlyBudget,
                 hours_repartition,
                 synthese: { ...synthese, tarif_horaire_moyen: tarifGlobal },
                 feries,
-                theoMensuel
+                theoMensuel,
+                etpMensuel,
+                // Référence brute (1 employé plein temps, net fériés) — exposée pour que le
+                // frontend puisse recalculer l'ETP sur un sous-ensemble d'employés (filtre
+                // département) sans redemander l'API : ETP = Σ theo du sous-ensemble ÷ refTheoMensuel.
+                refTheoMensuel: refTheo.parMois
             }
         });
     } catch (err: any) {

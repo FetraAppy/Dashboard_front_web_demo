@@ -26,16 +26,24 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // View state
   activeSubTab = 'indicateurs';
   activeCollab = 'all';
+  activeDepartment = 'all';
   activeYear = '2026';
   activeMonth = 'all';
+  departmentsList: string[] = [];
   // Day filter removed
 
   // Constants
   monthNames = MF;
   monthShortNames = MS;
   theoHours: number[] = [];
-  ferieHours: number[] = [];
+  // ferieHours: number[] = []; // désactivé — jours fériés retirés du calcul (échelle
+  // incohérente avec theoHours en vue "all" : ferieHours était multiplié par l'effectif
+  // brut alors que theoHours est déjà prorata par employé, ex. 736h aberrant en janvier)
   caBudget: number[] = [];
+  // ETP par mois — Σ H.théoriques employés (net fériés, prorata embauche/départ) ÷
+  // H.théorique d'1 employé plein temps référence. Remplace l'ancienne somme de ratios
+  // de contrat, non prorata par présence réelle sur l'année (cas BARBEN Thibaut).
+  etpMonthly: number[] = [];
 
   // Synthesis parameters
   tarifHoraire = 180;
@@ -50,7 +58,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   etpValue = 0;
 
   baseMax = 0;
-  totalFeriesHours = 0;
+  // totalFeriesHours = 0; // désactivé — jours fériés retirés du calcul, voir ferieHours ci-dessus
   totalCaBudget = 0;
 
   // Dynamic API Loaded Data
@@ -127,15 +135,19 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         this.collabData = data.collab || {};
         this.globalData = data.global || {};
         this.collaboratorsList = Object.keys(this.collabData).sort();
+        this.departmentsList = Array.isArray(data.departments) ? data.departments : [];
 
         // Update from API computed values
+        // Jours fériés retirés du calcul (voir ferieHours plus haut) — on garde uniquement
+        // joursFeriesCalcules à titre informatif dans le panneau de synthèse (ne nourrit
+        // plus aucun calcul), on ne peuple plus _feriePP/ferieHours.
         if (this.globalData.feries) {
-          this._feriePP = [...this.globalData.feries.parMois];
-          this.ferieHours = [...this._feriePP];
+          // this._feriePP = [...this.globalData.feries.parMois];
+          // this.ferieHours = [...this._feriePP];
           this.joursFeriesCalcules = this.globalData.feries.totalHeures;
         } else {
-          this._feriePP = Array(12).fill(0);
-          this.ferieHours = Array(12).fill(0);
+          // this._feriePP = Array(12).fill(0);
+          // this.ferieHours = Array(12).fill(0);
           this.joursFeriesCalcules = 0;
         }
 
@@ -148,6 +160,15 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           this.theoHours = Array(12).fill(0);
           this.heuresTheoAnnuelles = 0;
         }
+
+        this._etpMensuel = Array.isArray(this.globalData.etpMensuel)
+          ? [...this.globalData.etpMensuel]
+          : Array(12).fill(0);
+        // Référence brute (1 employé plein temps, net fériés) — permet de recalculer l'ETP
+        // sur un sous-ensemble d'employés (filtre département) sans redemander l'API.
+        this._refTheoPP = Array.isArray(this.globalData.refTheoMensuel)
+          ? [...this.globalData.refTheoMensuel]
+          : Array(12).fill(0);
 
         if (this.globalData.synthese) {
           const s = this.globalData.synthese;
@@ -182,8 +203,27 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.fetchDashboardData();
   }
 
+  /** Département cumulable avec le filtre collaborateur : si le collaborateur sélectionné
+   *  n'appartient pas au nouveau département, on revient à "tous" pour ce département. */
+  onDepartmentChange() {
+    if (this.activeCollab !== 'all'
+        && this.activeDepartment !== 'all'
+        && this.collabData[this.activeCollab]?.department !== this.activeDepartment) {
+      this.activeCollab = 'all';
+    }
+    this.calculateData();
+    this.renderCharts();
+  }
+
+  /** Liste des collaborateurs restreinte au département sélectionné (filtre cumulable). */
+  get filteredCollaboratorsList(): string[] {
+    if (this.activeDepartment === 'all') return this.collaboratorsList;
+    return this.collaboratorsList.filter(name => this.collabData[name]?.department === this.activeDepartment);
+  }
+
   resetFilters() {
     this.activeCollab = 'all';
+    this.activeDepartment = 'all';
     this.activeYear = '2026';
     this.activeMonth = 'all';
     this.fetchDashboardData();
@@ -191,13 +231,42 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
   getFilterInfo(): string {
     const collabText = this.activeCollab === 'all' ? 'Tous collaborateurs' : this.activeCollab;
+    const deptText = this.activeDepartment === 'all' ? null : this.activeDepartment;
     const yearText = this.activeYear;
     const monthText = this.activeMonth === 'all' ? 'Toute l\'année' : MF[parseInt(this.activeMonth)];
-    return `${collabText} · ${yearText} · ${monthText}`;
+    return [collabText, deptText, yearText, monthText].filter(Boolean).join(' · ');
   }
 
   mathRound(val: number): number {
     return Math.round(val);
+  }
+
+  // Objectifs de productivité — auparavant 20 chiffres codés en dur dans le HTML (1272h,
+  // 69.1%, etc.), calibrés sur une référence annuelle fixe de 1840h (= 230 jours × 8h,
+  // indépendante du calendrier réel — reverse-engineering : H.max ÷ Prod.2 valait ~1840h
+  // sur les 4 paliers). Remplacée par la vraie référence déjà calculée par l'API pour
+  // l'année sélectionnée (refTheoMensuel : 1 employé plein temps, jours ouvrés − fériés),
+  // pour que les seuils s'ajustent automatiquement si l'année change. Les 4 seuils % sont
+  // recopiés tels quels depuis l'ancien tableau — leur origine métier exacte (paliers
+  // 0.5/1/1.5/2+, hypothèse : montée en charge sur le volume d'heures cumulées dans
+  // l'année) n'est pas connue avec certitude.
+  readonly seuilsProductivite = [0.691, 0.728, 0.764, 0.822];
+
+  get refAnnuelleH(): number {
+    return Math.round(this._refTheoPP.reduce((s, v) => s + v, 0));
+  }
+
+  get objectifsProductivite(): { niveau: string; hMin: number | null; hMax: number | null; prod1: number | null; prod2: number | null }[] {
+    const ref = this.refAnnuelleH;
+    const s = this.seuilsProductivite;
+    const hMax = s.map(pct => Math.round(pct * ref));
+    return [
+      { niveau: '🎯 Seuil',   hMin: null,        hMax: hMax[0], prod1: null,       prod2: s[0] * 100 },
+      { niveau: 'Niveau 0.5', hMin: hMax[0] + 1, hMax: hMax[1], prod1: s[0] * 100, prod2: s[1] * 100 },
+      { niveau: 'Niveau 1',   hMin: hMax[1] + 1, hMax: hMax[2], prod1: s[1] * 100, prod2: s[2] * 100 },
+      { niveau: 'Niveau 1.5', hMin: hMax[2] + 1, hMax: hMax[3], prod1: s[2] * 100, prod2: s[3] * 100 },
+      { niveau: 'Niveau 2+',  hMin: hMax[3] + 1, hMax: null,    prod1: s[3] * 100, prod2: null },
+    ];
   }
 
   /**
@@ -216,6 +285,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
   private _theoPP: number[] = [];
   private _feriePP: number[] = [];
+  private _etpMensuel: number[] = [];
+  private _refTheoPP: number[] = [];
 
   /** Dernier mois (index 0-11) avec données réelles, selon la date du jour. */
   get maxMonthIndex(): number {
@@ -229,7 +300,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   calculateData() {
     // Reset to pristine per-person values (API), then scale only for "all" view
     this.theoHours = [...this._theoPP];
-    this.ferieHours = [...this._feriePP];
+    // this.ferieHours = [...this._feriePP]; // désactivé — jours fériés retirés du calcul
 
     let real = Array(12).fill(0);
     let car = Array(12).fill(0);
@@ -247,8 +318,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
       this.tarifHoraire = this.globalData.synthese?.tarif_horaire_moyen || parseFloat(this.globalData.synthese?.tarif_horaire_chf) || 180;
 
-      let totalEtp = 0;
-      const collabNames = Object.keys(this.collabData);
+      // Filtre département (cumulable avec le filtre collaborateur) : ne garder que les
+      // employés du département sélectionné avant d'agréger.
+      const collabNames = Object.keys(this.collabData).filter(name =>
+        this.activeDepartment === 'all' || this.collabData[name].department === this.activeDepartment
+      );
       if (collabNames.length > 0) {
         const theoAll = Array(12).fill(0);
         collabNames.forEach(name => {
@@ -261,20 +335,21 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           c.vac_m.forEach((v: number, i: number) => vac[i] += v);
           c.mal_m.forEach((v: number, i: number) => mal[i] += v);
           vacInit += c.vac_init || 0;
-          totalEtp += c.etp || 1;
 
           if (c.ca_bud) c.ca_bud.forEach((v: number, i: number) => this.caBudget[i] += v);
           caBudgetAnnuelCalcule += c.ca_budget_annuel || 0;
         });
-        this.etpValue = totalEtp;
-        const n = collabNames.length;
-        // Theo global = somme des theo par employé (calendrier + prorata) ; fériés × n
+        // ETP mensuel = Σ H.théoriques du sous-ensemble affiché (net fériés, prorata) ÷
+        // H.théorique d'1 employé plein temps référence. Recalculé depuis la référence brute
+        // (pas depuis global.etpMensuel, qui est figé sur toute l'entreprise) pour rester
+        // correct quand le filtre département réduit le sous-ensemble d'employés.
+        this.etpMonthly = theoAll.map((v, i) => this._refTheoPP[i] > 0 ? v / this._refTheoPP[i] : 0);
+        // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés)
         this.theoHours = theoAll;
-        this.ferieHours = this._feriePP.map(f => f * n);
       } else {
         this.caBudget = this.globalData.ca_bud || [];
         caBudgetAnnuelCalcule = parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
-        this.etpValue = 0;
+        this.etpMonthly = Array(12).fill(0);
       }
     } else if (this.collabData[this.activeCollab]) {
       const c = this.collabData[this.activeCollab];
@@ -286,16 +361,18 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       mal = [...c.mal_m];
       vacInit = c.vac_init || 0;
       this.theoHours = c.theo ? [...c.theo] : [...this._theoPP];
-      this.ferieHours = [...this._feriePP];
+      // this.ferieHours = [...this._feriePP]; // désactivé — jours fériés retirés du calcul
 
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
       caBudgetAnnuelCalcule = c.ca_budget_annuel || parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
       if (c.tarif_moyen) this.tarifHoraire = c.tarif_moyen;
-      this.etpValue = c.etp || 1;
+      // Vue individuelle : ETP = taux d'activité du contrat (ex. 0.8 pour un 80%), pas le
+      // ratio théorique/référence utilisé pour le total "Tous collaborateurs".
+      this.etpMonthly = Array(12).fill(c.etp || 1);
     } else {
       this.caBudget = this.globalData.ca_bud || [];
       caBudgetAnnuelCalcule = parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
-      this.etpValue = 0;
+      this.etpMonthly = Array(12).fill(0);
     }
 
     this.caBudgetAnnuel = caBudgetAnnuelCalcule;
@@ -344,13 +421,19 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // Table footers
     this.totalTheoHours = monthIndices.reduce((s, i) => s + this.theoHours[i], 0);
     this.totalRealHours = monthIndices.reduce((s, i) => s + real[i], 0);
+    // ETP affiché en pied de tableau = moyenne des ETP mensuels sur la période sélectionnée
+    // (un ETP mensuel, pas une somme — sommer des mois donnerait un nombre sans sens).
+    this.etpValue = monthIndices.length > 0
+      ? monthIndices.reduce((s, i) => s + (this.etpMonthly[i] || 0), 0) / monthIndices.length
+      : 0;
 
     // Total variable hours
     let totVar = 0;
     monthIndices.forEach(i => {
       const v = real[i];
       if (v > 0) {
-        totVar += v - (this.theoHours[i] - (this.ferieHours[i] || 0));
+        // totVar += v - (this.theoHours[i] - (this.ferieHours[i] || 0)); // désactivé — fériés retirés du calcul
+        totVar += v - this.theoHours[i];
       }
     });
     this.totalVarHours = totVar;
@@ -366,7 +449,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.totalAbsences = monthIndices.reduce((s, i) => s + abs_[i], 0);
 
     this.baseMax = Math.max(...this.theoHours);
-    this.totalFeriesHours = monthIndices.reduce((s, i) => s + (this.ferieHours[i] || 0), 0);
+    // this.totalFeriesHours = monthIndices.reduce((s, i) => s + (this.ferieHours[i] || 0), 0); // désactivé — fériés retirés du calcul
     this.totalCaBudget = monthIndices.reduce((s, i) => s + this.caBudget[i], 0);
 
     // Heures facturables (account_analytic_line, amount < 0) — numérateur de la productivité
@@ -393,6 +476,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   /** Formatage général (%, x, j, h, pts, ratios…) — paramétré centralement */
   gen(n: number | null | undefined): string {
     return this.fmt.num(n);
+  }
+
+  /** Durées (heures théoriques/réalisées/fériés/vacances…) → "203h 35mn", plus d'arrondi direct */
+  formatHours(n: number | null | undefined): string {
+    return this.fmt.hoursMinutes(n);
   }
 
   destroyCharts() {
@@ -428,7 +516,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         let runningVar = 0;
         const cumVarAll = this.filteredRealHours.slice(0, months).map((r, i) => {
           if (r === 0) return null;
-          runningVar += r - (this.theoHours[i] - (this.ferieHours[i] || 0));
+          // runningVar += r - (this.theoHours[i] - (this.ferieHours[i] || 0)); // désactivé — fériés retirés du calcul
+          runningVar += r - this.theoHours[i];
           return runningVar;
         });
         const cumVarData = isAllMonths ? cumVarAll : [cumVarAll[activeMonthIndex]];
@@ -534,16 +623,20 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           ? Object.values(this.collabData).reduce((s, c: any) => s + (c.vac_init || 0), 0)
           : (this.collabData[this.activeCollab]?.vac_init || 0);
         const vac = vacAlloc * monthRatio;
-        const fer = monthIndices.reduce((s, i) => s + (this.ferieHours[i] || 0), 0);
-        const factPot = Math.max(0, theoAnnuel - vac - fer);
+        // const fer = monthIndices.reduce((s, i) => s + (this.ferieHours[i] || 0), 0); // désactivé — fériés retirés du calcul
+        // const factPot = Math.max(0, theoAnnuel - vac - fer); // désactivé — voir ci-dessus
+        const factPot = Math.max(0, theoAnnuel - vac);
 
         this.chartDonut = new Chart(ctx, {
           type: 'doughnut',
           data: {
-            labels: ['Facturables pot.', 'Vacances', 'Jours fériés'],
+            // labels: ['Facturables pot.', 'Vacances', 'Jours fériés'], // désactivé — jours fériés retirés du calcul
+            labels: ['Facturables pot.', 'Vacances'],
             datasets: [{
-              data: [factPot, vac, fer],
-              backgroundColor: ['#3b82f6', '#d946ef', '#94a3b8'],
+              // data: [factPot, vac, fer], // désactivé — jours fériés retirés du calcul
+              data: [factPot, vac],
+              // backgroundColor: ['#3b82f6', '#d946ef', '#94a3b8'], // désactivé — jours fériés retirés du calcul
+              backgroundColor: ['#3b82f6', '#d946ef'],
               borderWidth: 2,
               borderColor: this.isDark ? '#111827' : '#fff'
             }]
