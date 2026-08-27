@@ -308,8 +308,13 @@
 
       <!-- Column side: Objectifs & non-fact charts -->
       <div style="display: flex; flex-direction: column; gap: 20px;">
-        <!-- Objectifs de productivité — générés depuis refAnnuelleH (référence réelle de
-             l'année sélectionnée) × seuilsProductivite, plus plus de valeurs figées -->
+        <!-- Objectifs de productivité — ancien tableau à 5 niveaux (Seuil/0.5/1/1.5/2+)
+             désactivé : aucune formule réelle derrière (20 valeurs tapées à la main dans le
+             tout premier prototype, jamais calculées). Remplacé par la vraie règle
+             documentée (utils/kpi_config.py OPERATIONAL_DEFAULTS + JS du prototype
+             d'origine) : un objectif unique 75%, un seuil "proche" 69.1%. Voir
+             CORRECTIONS_OPERATIONNEL.md, section 11. -->
+        <!--
         <div class="card">
           <div class="chart-title">Objectifs de productivité {{ activeYear }}</div>
           <div class="table-wrapper" style="margin-top: 8px;">
@@ -337,6 +342,26 @@
           <div class="info ig">
             <strong>Prod. 1 :</strong> sans admin ni séances (bureau)<br>
             <strong>Prod. 2 :</strong> sans admin, séances, vacances, militaire et maladie
+          </div>
+        </div>
+        -->
+        <div class="card">
+          <div class="chart-title">Objectif de productivité {{ activeYear }}</div>
+          <div class="chart-subtitle">Productivité réalisée vs cible fixe (utils/kpi_config.py)</div>
+          <div style="text-align: center; margin: 20px 0 12px;">
+            <div style="font-size: 36px; font-weight: 800;"
+                 [style.color]="statutObjectifProductivite === 'atteint' ? '#16a34a' : statutObjectifProductivite === 'proche' ? '#ca8a04' : '#dc2626'">
+              {{ gen(kpiObjectifProductivite) }}%
+            </div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+              Productivité réalisée — {{ getFilterInfo() }}
+            </div>
+          </div>
+          <div class="st"><span class="st-l">Cible</span><span class="st-v">{{ OBJECTIF_PRODUCTIVITE_PCT }}%</span></div>
+          <div class="st"><span class="st-l">Seuil « proche objectif »</span><span class="st-v">{{ SEUIL_PROCHE_OBJECTIF_PCT }}%</span></div>
+          <div class="info ig">
+            <strong>Statut :</strong>
+            {{ statutObjectifProductivite === 'atteint' ? '▲ Objectif atteint' : statutObjectifProductivite === 'proche' ? '≈ Proche objectif' : '▼ Sous objectif' }}
           </div>
         </div>
 

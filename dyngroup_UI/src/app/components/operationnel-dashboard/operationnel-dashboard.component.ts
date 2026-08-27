@@ -241,32 +241,29 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     return Math.round(val);
   }
 
-  // Objectifs de productivité — auparavant 20 chiffres codés en dur dans le HTML (1272h,
-  // 69.1%, etc.), calibrés sur une référence annuelle fixe de 1840h (= 230 jours × 8h,
-  // indépendante du calendrier réel — reverse-engineering : H.max ÷ Prod.2 valait ~1840h
-  // sur les 4 paliers). Remplacée par la vraie référence déjà calculée par l'API pour
-  // l'année sélectionnée (refTheoMensuel : 1 employé plein temps, jours ouvrés − fériés),
-  // pour que les seuils s'ajustent automatiquement si l'année change. Les 4 seuils % sont
-  // recopiés tels quels depuis l'ancien tableau — leur origine métier exacte (paliers
-  // 0.5/1/1.5/2+, hypothèse : montée en charge sur le volume d'heures cumulées dans
-  // l'année) n'est pas connue avec certitude.
-  readonly seuilsProductivite = [0.691, 0.728, 0.764, 0.822];
+  // Objectifs de productivité — remplace un tableau à 5 niveaux (Seuil/0.5/1/1.5/2+) inventé
+  // sans formule réelle (20 chiffres tapés à la main dans le tout premier prototype, jamais
+  // calculés ni là ni ailleurs — vérifié en remontant au commit d'origine 50dcb12,
+  // dashboard_operationnel_v1.html). La vraie règle documentée, retrouvée dans
+  // utils/kpi_config.py (OPERATIONAL_DEFAULTS) ET dans le JS de ce même prototype d'origine
+  // (`pct>=75 ? 'Objectif atteint' : pct>=69.1 ? 'Proche objectif' : 'Sous objectif'`), est
+  // un objectif UNIQUE de 75% comparé au vrai H.théoriques (dynamique, déjà calculé plus haut
+  // — prorata par employé, net fériés), avec un seul seuil intermédiaire à 69.1%.
+  // readonly seuilsProductivite = [0.691, 0.728, 0.764, 0.822];
+  // get refAnnuelleH(): number { return Math.round(this._refTheoPP.reduce((s, v) => s + v, 0)); }
+  // get objectifsProductivite(): ... { ... } // ancien tableau à 5 niveaux, voir CORRECTIONS_OPERATIONNEL.md
 
-  get refAnnuelleH(): number {
-    return Math.round(this._refTheoPP.reduce((s, v) => s + v, 0));
-  }
+  /** Cible de productivité annuelle — kpi_config.py: OPERATIONAL_DEFAULTS.objectif_productivite_pct */
+  readonly OBJECTIF_PRODUCTIVITE_PCT = 75;
+  /** Seuil "proche objectif" — retrouvé dans le JS du prototype d'origine (dashboard_operationnel_v1.html) */
+  readonly SEUIL_PROCHE_OBJECTIF_PCT = 69.1;
 
-  get objectifsProductivite(): { niveau: string; hMin: number | null; hMax: number | null; prod1: number | null; prod2: number | null }[] {
-    const ref = this.refAnnuelleH;
-    const s = this.seuilsProductivite;
-    const hMax = s.map(pct => Math.round(pct * ref));
-    return [
-      { niveau: '🎯 Seuil',   hMin: null,        hMax: hMax[0], prod1: null,       prod2: s[0] * 100 },
-      { niveau: 'Niveau 0.5', hMin: hMax[0] + 1, hMax: hMax[1], prod1: s[0] * 100, prod2: s[1] * 100 },
-      { niveau: 'Niveau 1',   hMin: hMax[1] + 1, hMax: hMax[2], prod1: s[1] * 100, prod2: s[2] * 100 },
-      { niveau: 'Niveau 1.5', hMin: hMax[2] + 1, hMax: hMax[3], prod1: s[2] * 100, prod2: s[3] * 100 },
-      { niveau: 'Niveau 2+',  hMin: hMax[3] + 1, hMax: null,    prod1: s[3] * 100, prod2: null },
-    ];
+  /** Statut de la productivité réalisée sur la période affichée (kpiObjectifProductivite,
+   *  dynamique, basée sur le vrai H.théoriques) comparée à la cible fixe. */
+  get statutObjectifProductivite(): 'atteint' | 'proche' | 'sous' {
+    if (this.kpiObjectifProductivite >= this.OBJECTIF_PRODUCTIVITE_PCT) return 'atteint';
+    if (this.kpiObjectifProductivite >= this.SEUIL_PROCHE_OBJECTIF_PCT) return 'proche';
+    return 'sous';
   }
 
   /**
