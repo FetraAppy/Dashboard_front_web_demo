@@ -135,7 +135,12 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         this.collabData = data.collab || {};
         this.globalData = data.global || {};
         this.collaboratorsList = Object.keys(this.collabData).sort();
-        this.departmentsList = Array.isArray(data.departments) ? data.departments : [];
+        // Filtre département simplifié en 2 groupes : "Administration" vs "Autre" (tous les
+        // autres départements combinés) — demandé le 2026-08-27, au lieu de lister chaque
+        // département réel (Assurance, Audit, Fiduciaire, Fiscalité, Fiscalité PM, Support...).
+        const hasAdmin = Object.values(this.collabData).some((c: any) => c.department === 'Administration');
+        const hasAutre = Object.values(this.collabData).some((c: any) => c.department && c.department !== 'Administration');
+        this.departmentsList = [...(hasAdmin ? ['Administration'] : []), ...(hasAutre ? ['Autre'] : [])];
 
         // Update from API computed values
         // Jours fériés retirés du calcul (voir ferieHours plus haut) — on garde uniquement
@@ -203,12 +208,18 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.fetchDashboardData();
   }
 
+  /** Regroupe le département réel d'un employé en 2 catégories : "Administration" ou "Autre"
+   *  (tous les autres départements combinés). */
+  deptBucket(name: string): string {
+    return this.collabData[name]?.department === 'Administration' ? 'Administration' : 'Autre';
+  }
+
   /** Département cumulable avec le filtre collaborateur : si le collaborateur sélectionné
    *  n'appartient pas au nouveau département, on revient à "tous" pour ce département. */
   onDepartmentChange() {
     if (this.activeCollab !== 'all'
         && this.activeDepartment !== 'all'
-        && this.collabData[this.activeCollab]?.department !== this.activeDepartment) {
+        && this.deptBucket(this.activeCollab) !== this.activeDepartment) {
       this.activeCollab = 'all';
     }
     this.calculateData();
@@ -218,7 +229,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   /** Liste des collaborateurs restreinte au département sélectionné (filtre cumulable). */
   get filteredCollaboratorsList(): string[] {
     if (this.activeDepartment === 'all') return this.collaboratorsList;
-    return this.collaboratorsList.filter(name => this.collabData[name]?.department === this.activeDepartment);
+    return this.collaboratorsList.filter(name => this.deptBucket(name) === this.activeDepartment);
   }
 
   resetFilters() {
@@ -316,9 +327,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.tarifHoraire = this.globalData.synthese?.tarif_horaire_moyen || parseFloat(this.globalData.synthese?.tarif_horaire_chf) || 180;
 
       // Filtre département (cumulable avec le filtre collaborateur) : ne garder que les
-      // employés du département sélectionné avant d'agréger.
+      // employés du groupe sélectionné avant d'agréger (Administration / Autre).
       const collabNames = Object.keys(this.collabData).filter(name =>
-        this.activeDepartment === 'all' || this.collabData[name].department === this.activeDepartment
+        this.activeDepartment === 'all' || this.deptBucket(name) === this.activeDepartment
       );
       if (collabNames.length > 0) {
         const theoAll = Array(12).fill(0);
@@ -336,11 +347,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c.ca_bud) c.ca_bud.forEach((v: number, i: number) => this.caBudget[i] += v);
           caBudgetAnnuelCalcule += c.ca_budget_annuel || 0;
         });
-        // ETP mensuel = Σ H.théoriques du sous-ensemble affiché (net fériés, prorata) ÷
-        // H.théorique d'1 employé plein temps référence. Recalculé depuis la référence brute
-        // (pas depuis global.etpMensuel, qui est figé sur toute l'entreprise) pour rester
-        // correct quand le filtre département réduit le sous-ensemble d'employés.
-        this.etpMonthly = theoAll.map((v, i) => this._refTheoPP[i] > 0 ? v / this._refTheoPP[i] : 0);
+        // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales —
+        // simplification demandée le 2026-08-27, remplace la formule société/référence
+        // (théoriques du sous-ensemble ÷ référence 1 ETP) précédente.
+        this.etpMonthly = theoAll.map((t, i) => t > 0 ? Math.round((real[i] / t) * 100) / 100 : 0);
         // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés)
         this.theoHours = theoAll;
       } else {
@@ -363,9 +373,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
       caBudgetAnnuelCalcule = c.ca_budget_annuel || parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
       if (c.tarif_moyen) this.tarifHoraire = c.tarif_moyen;
-      // Vue individuelle : ETP = taux d'activité du contrat (ex. 0.8 pour un 80%), pas le
-      // ratio théorique/référence utilisé pour le total "Tous collaborateurs".
-      this.etpMonthly = Array(12).fill(c.etp || 1);
+      // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales — même
+      // formule que la vue "Tous collaborateurs".
+      this.etpMonthly = real.map((v, i) => this.theoHours[i] > 0 ? Math.round((v / this.theoHours[i]) * 100) / 100 : 0);
     } else {
       this.caBudget = this.globalData.ca_bud || [];
       caBudgetAnnuelCalcule = parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;

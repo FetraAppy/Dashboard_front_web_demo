@@ -279,8 +279,8 @@
                     </span>
                     <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
-                  <!-- <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td> -->
-                  <td style="text-align: right; color: var(--text-secondary);">{{ gen((filteredRealHours[i]/theoHours[i]*100)/100)  }}</td>
+                  <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td> 
+                  <!-- <td style="text-align: right; color: var(--text-secondary);">{{ gen((filteredRealHours[i]/theoHours[i]*100)/100)  }}</td> -->
                 </tr>
               </ng-container>
             </tbody>
@@ -353,9 +353,6 @@
             <div style="font-size: 36px; font-weight: 800;"
                  [style.color]="statutObjectifProductivite === 'atteint' ? '#16a34a' : statutObjectifProductivite === 'proche' ? '#ca8a04' : '#dc2626'">
               {{ gen(kpiObjectifProductivite) }}%
-            </div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-              Productivité réalisée — {{ getFilterInfo() }}
             </div>
           </div>
           <div class="st"><span class="st-l">Cible</span><span class="st-v">{{ OBJECTIF_PRODUCTIVITE_PCT }}%</span></div>
