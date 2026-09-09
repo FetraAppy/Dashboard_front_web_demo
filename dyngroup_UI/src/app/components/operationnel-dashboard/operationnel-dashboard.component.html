@@ -185,8 +185,11 @@
       <div class="chart-container" style="height: 260px;">
         <canvas #chCaEcartCanvas></canvas>
       </div>
-      <div class="info io">
+      <div class="info io" *ngIf="caBudgetAnnuel > 0">
         <strong>Cumul CA :</strong> somme progressive de l'écart (CA réalisé – CA budget) de janvier jusqu'au mois courant. Barre verte = dépassement, rouge = retard.
+      </div>
+      <div class="info io" *ngIf="caBudgetAnnuel === 0">
+        <strong>Budget non défini</strong> pour cette sélection (aucune donnée de budget saisie dans Odoo) — le graphique n'affiche pas d'écart tant qu'il n'y a pas de budget réel à comparer.
       </div>
     </div>
 
@@ -282,7 +285,7 @@
                   <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td> 
                   <!-- <td style="text-align: right; color: var(--text-secondary);">{{ gen((filteredRealHours[i]/theoHours[i]*100)/100)  }}</td> -->
                 </tr>
-              </ng-container>
+              </ng-container> 
             </tbody>
             <tfoot>
               <tr style="font-weight: 700; background: var(--th-bg);">
@@ -366,7 +369,7 @@
         <!-- Non Facturable Chart -->
         <div class="card">
           <div class="chart-title">Heures non facturables cumulées</div>
-          <div class="chart-subtitle">Répartition par catégorie (YTD)</div>
+          <div class="chart-subtitle">Répartition par catégorie — {{ getFilterInfo() }}</div>
           <div class="chart-container" style="height: 230px;">
             <canvas #chNonFactCanvas></canvas>
           </div>

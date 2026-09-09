@@ -45,11 +45,16 @@ function isWeekend(d: Date): boolean {
 }
 
 /**
- * Dates des jours fériés vaudois d'une année, filtrées week-ends et dates futures.
+ * Dates des jours fériés vaudois d'une année, filtrées week-ends (et dates futures si
+ * toDate=true, comportement par défaut — utilisé pour les graphiques/tableaux mensuels).
+ * toDate=false renvoie les 9 jours fériés de l'année complète, sans coupure à aujourd'hui —
+ * utilisé pour les totaux annuels du panneau Synthèse (H. théoriques annuelles, Jours
+ * fériés calculés), qui doivent représenter l'année entière, pas "à ce jour" (vérifié
+ * contre une feuille de référence RH : ces totaux couvrent les 12 mois même en cours d'année).
  * Base commune pour computeVaudHolidays (référence 1 personne) et
  * computeTheoMensuelEmployee (prorata réel par employé).
  */
-function getVaudHolidayDates(year: number): Date[] {
+function getVaudHolidayDates(year: number, toDate: boolean = true): Date[] {
     const paques = computEaster(year);
     const now = new Date();
 
@@ -65,15 +70,15 @@ function getVaudHolidayDates(year: number): Date[] {
         new Date(year, 11, 25),       // Noël
     ];
 
-    return holidays.filter(h => !isWeekend(h) && h <= now);
+    return holidays.filter(h => !isWeekend(h) && (!toDate || h <= now));
 }
 
-function computeVaudHolidays(year: number): { parMois: number[]; totalHeures: number } {
-    const holidays = getVaudHolidayDates(year);
+/** Convertit une liste de dates de jours fériés en répartition mensuelle (8h/jour). */
+function holidaysToMonthly(dates: Date[]): { parMois: number[]; totalHeures: number } {
     const parMois = Array<number>(12).fill(0);
     let totalHeures = 0;
 
-    for (const h of holidays) {
+    for (const h of dates) {
         parMois[h.getMonth()] += 8;
         totalHeures += 8;
     }
@@ -81,7 +86,48 @@ function computeVaudHolidays(year: number): { parMois: number[]; totalHeures: nu
     return { parMois, totalHeures };
 }
 
-function computeMonthlyTheo(year: number, feriesParMois: number[]): { parMois: number[]; totalAnnuel: number } {
+function computeVaudHolidays(year: number, toDate: boolean = true): { parMois: number[]; totalHeures: number } {
+    return holidaysToMonthly(getVaudHolidayDates(year, toDate));
+}
+
+// Libellés de resource.calendar.leaves connus comme n'étant PAS des fériés vaudois, à exclure.
+// Repéré en explorant les données réelles Odoo : "Jeûne genevois" est un férié du canton de
+// Genève, pas de Vaud. À compléter si d'autres cas apparaissent (voir docs/JOURS_FERIES_ODOO.md).
+const NON_VAUD_HOLIDAY_NAMES = ['Jeûne genevois'];
+
+/**
+ * Jours fériés réels de l'année, lus depuis le vrai calendrier Odoo
+ * (staging.resource_calendar_leaves), dédupliqués par date — chaque jour férié existe en 5 à 6
+ * exemplaires identiques dans Odoo (imports répétés) — et filtrés sur les congés globaux
+ * (resource_id vide, hors congés individuels) en excluant les libellés non-vaudois connus.
+ * Renvoie TOUTES les dates officielles, y compris celles tombant un week-end (ex. 1er août 2026
+ * tombe un samedi) : c'est à l'appelant de filtrer par jour de semaine selon le besoin (info
+ * calendrier brute vs déduction réelle des heures théoriques).
+ * Renvoie null si la table n'existe pas encore, ou si Odoo n'a aucune donnée pour cette année
+ * (constaté pour 2025 et les années antérieures — seules 2026/2027 sont paramétrées à ce jour) :
+ * dans ce cas, l'appelant doit retomber sur getVaudHolidayDates() (calcul par formule).
+ */
+async function resolveOdooHolidayDates(annee: number): Promise<Date[] | null> {
+    try {
+        const placeholders = NON_VAUD_HOLIDAY_NAMES.map((_, i) => `$${i + 2}`).join(', ');
+        const res = await pool.query(
+            `SELECT DISTINCT date_from::date AS d
+             FROM staging.resource_calendar_leaves
+             WHERE (resource_id IS NULL OR resource_id::text IN ('', 'False'))
+               AND name NOT IN (${placeholders})
+               AND EXTRACT(YEAR FROM date_from::date) = $1`,
+            [annee, ...NON_VAUD_HOLIDAY_NAMES]
+        );
+        if (res.rows.length === 0) return null;
+        return res.rows.map(r => new Date(r.d));
+    } catch (_) {
+        return null; // table pas encore extraite (avant premier run du DAG stage1_hr), fallback silencieux
+    }
+}
+
+function computeMonthlyTheo(
+    year: number, feriesParMois: number[], toDate: boolean = true
+): { parMois: number[]; totalAnnuel: number } {
     const now = new Date();
     const isCurrentYear = now.getFullYear() === year;
     const currentMonth = now.getMonth();
@@ -91,11 +137,11 @@ function computeMonthlyTheo(year: number, feriesParMois: number[]): { parMois: n
     let totalAnnuel = 0;
 
     for (let m = 0; m < 12; m++) {
-        if (year > now.getFullYear()) break; // future year → all zeros
-        if (isCurrentYear && m > currentMonth) continue; // future month → 0
+        if (toDate && year > now.getFullYear()) break; // future year → all zeros
+        if (toDate && isCurrentYear && m > currentMonth) continue; // future month → 0
 
         const daysInMonth = new Date(year, m + 1, 0).getDate();
-        const lastDay = (isCurrentYear && m === currentMonth) ? today : daysInMonth;
+        const lastDay = (toDate && isCurrentYear && m === currentMonth) ? today : daysInMonth;
         let workingDays = 0;
         for (let d = 1; d <= lastDay; d++) {
             const dow = new Date(year, m, d).getDay();
@@ -118,11 +164,14 @@ function computeMonthlyTheo(year: number, feriesParMois: number[]): { parMois: n
  * effectivement sous contrat ce mois-là (pas de déduction avant l'embauche/après le
  * départ) — contrairement à l'ancien calcul global qui appliquait un forfait plat
  * (8h × effectif brut) sans tenir compte du temps partiel ni des entrées/sorties.
+ * toDate=false calcule l'année complète (mois futurs inclus, pas de coupure à aujourd'hui) —
+ * utilisé pour "H. théoriques annuelles" du panneau Synthèse (voir getVaudHolidayDates).
  */
 function computeTheoMensuelEmployee(
     emp: { hours_per_day: string | number | null; first_contract_date: string | null; departure_date: string | null },
     year: number,
-    holidayDates: Date[]
+    holidayDates: Date[],
+    toDate: boolean = true
 ): number[] {
     const hpd = parseFloat(String(emp.hours_per_day ?? '')) || 8;
     const now = new Date();
@@ -138,11 +187,11 @@ function computeTheoMensuelEmployee(
 
     const parMois = Array<number>(12).fill(0);
     for (let m = 0; m < 12; m++) {
-        if (year > now.getFullYear()) break; // future year → all zeros
-        if (isCurrentYear && m > now.getMonth()) continue; // future month → 0
+        if (toDate && year > now.getFullYear()) break; // future year → all zeros
+        if (toDate && isCurrentYear && m > now.getMonth()) continue; // future month → 0
 
         const daysInMonth = new Date(year, m + 1, 0).getDate();
-        const lastDay = (isCurrentYear && m === now.getMonth()) ? now.getDate() : daysInMonth;
+        const lastDay = (toDate && isCurrentYear && m === now.getMonth()) ? now.getDate() : daysInMonth;
         const d1 = new Date(year, m, 1);
         const d2 = new Date(year, m, lastDay);
 
@@ -167,10 +216,10 @@ function computeTheoMensuelEmployee(
 export async function getDashboardData(req: Request, res: Response) {
     try {
         const annee = parseInt(req.query.annee as string) || 2026;
-        const holidayDates = getVaudHolidayDates(annee);
+        const now = new Date();
 
-        // 1 & 2. Query synthesis params and active employees in parallel (independent queries)
-        const [syntheseRes, employeesRes] = await Promise.all([
+        // 1 & 2. Query synthesis params, active employees, et le vrai calendrier Odoo en parallèle
+        const [syntheseRes, employeesRes, odooHolidays] = await Promise.all([
             pool.query(
                 `SELECT * FROM kpi.operationnel_synthese_annuelle WHERE annee = $1 LIMIT 1`,
                 [annee]
@@ -189,8 +238,26 @@ export async function getDashboardData(req: Request, res: Response) {
                  WHERE osm.annee = $1
                  ORDER BY emp.name`,
                 [annee]
-            )
+            ),
+            resolveOdooHolidayDates(annee)
         ]);
+
+        // Jours fériés : source réelle Odoo si disponible pour l'année demandée (dédupliquée,
+        // hors libellés non-vaudois), sinon calcul par formule (getVaudHolidayDates). Voir
+        // docs/JOURS_FERIES_ODOO.md pour le détail de cette décision.
+        let holidayDates: Date[];             // fériés ouvrés, "à ce jour" — graphiques/tableaux mensuels
+        let holidayDatesFullYear: Date[];     // fériés ouvrés, année complète — H. théoriques annuelles
+        let holidayDatesRawFullYear: Date[];  // TOUTES les dates officielles (même week-end) — Jours fériés calculés
+        if (odooHolidays) {
+            const weekdaysOnly = odooHolidays.filter(h => !isWeekend(h));
+            holidayDates = weekdaysOnly.filter(h => h <= now);
+            holidayDatesFullYear = weekdaysOnly;
+            holidayDatesRawFullYear = odooHolidays;
+        } else {
+            holidayDates = getVaudHolidayDates(annee);
+            holidayDatesFullYear = getVaudHolidayDates(annee, false);
+            holidayDatesRawFullYear = holidayDatesFullYear;
+        }
 
         const synthese = syntheseRes.rows[0] || {
             annee,
@@ -337,14 +404,26 @@ export async function getDashboardData(req: Request, res: Response) {
                 ca_real: Array(12).fill(0),
                 billable: Array(12).fill(0),
                 theo: computeTheoMensuelEmployee(emp, annee, holidayDates),
+                // Théorique année complète (pas de coupure à aujourd'hui) — sert uniquement à
+                // "H. théoriques annuelles" du panneau Synthèse (voir toDate=false ci-dessus).
+                theoFullYear: computeTheoMensuelEmployee(emp, annee, holidayDatesFullYear, false),
                 ca_bud: Array(12).fill(monthlyBudget),
                 ca_budget_annuel: annualBudget,
                 vac_m: Array(12).fill(0),
                 mal_m: Array(12).fill(0),
                 abs_m: Array(12).fill(0),
                 vac_init: vacInitH,
-                non_fact: { admin: 0, vacances: 0, rh_it: 0, marketing: 0, formation: 0, maladie: 0 },
-                tarif_moyen: empTarifMap[emp.id] || empPriceMap[emp.id] || parseFloat(synthese.tarif_horaire_chf) || 180,
+                non_fact: {
+                    admin: Array(12).fill(0), vacances: Array(12).fill(0), rh_it: Array(12).fill(0),
+                    marketing: Array(12).fill(0), formation: Array(12).fill(0), maladie: Array(12).fill(0)
+                },
+                // Priorité à xx_hourly_price (empPriceMap) : c'est le tarif de référence RH
+                // saisi sur la fiche employé Odoo ("Hourly Price"), pas la moyenne des prix de
+                // vente réels (empTarifMap) qui varie selon les mandats facturés. Vérifié sur
+                // AGACHII Igor : xx_hourly_price=180 correspond exactement au "CA Brut" de
+                // référence (981h × 180 = 176'580), alors que sa moyenne de vente réelle
+                // (560.70) n'a aucun rapport avec ce total.
+                tarif_moyen: empPriceMap[emp.id] || empTarifMap[emp.id] || parseFloat(synthese.tarif_horaire_chf) || 180,
                 etp: empEtpMap[emp.id] || 1,
                 department: emp.department_name || null
             };
@@ -462,10 +541,11 @@ export async function getDashboardData(req: Request, res: Response) {
                  GROUP BY ld.employee_id, EXTRACT(MONTH FROM ld.day)::int`,
                 [annee]
             ),
-            // 8. Non-facturable categories breakdown from account_analytic_line
+            // 8. Non-facturable categories breakdown from account_analytic_line, par mois
             pool.query(
-                `SELECT 
+                `SELECT
                    employee_id,
+                   EXTRACT(MONTH FROM date::date)::int AS mois,
                    CASE
                      WHEN name LIKE 'Congé (1/%' THEN 'vacances'
                      WHEN name LIKE 'Congé (7/%' OR name LIKE 'Congé (8/%' OR name LIKE 'Congé (14/%' THEN 'maladie'
@@ -478,9 +558,9 @@ export async function getDashboardData(req: Request, res: Response) {
                    SUM(unit_amount) AS hours
                  FROM staging.account_analytic_line
                  WHERE (amount <= 0 OR amount IS NULL)
-                   AND date IS NOT NULL 
+                   AND date IS NOT NULL
                    AND EXTRACT(YEAR FROM date::date) = $1
-                 GROUP BY employee_id, 2`,
+                 GROUP BY employee_id, 2, 3`,
                 [annee]
             ),
             // 9. Global hours repartition by month
@@ -505,7 +585,9 @@ export async function getDashboardData(req: Request, res: Response) {
                 // Populate employee-specific values (theo = calendrier/prorata, calculé ci-dessus)
                 if (empName) {
                     collab[empName].real[mIdx] = parseFloat(row.heures_realisees) || 0;
-                    collab[empName].ca_real[mIdx] = parseFloat(row.ca_realise_chf) || 0;
+                    // ca_real n'est plus lu depuis ca_realise_chf : cette colonne est calculée
+                    // à l'ETL avec un tarif horaire FIXE (180 CHF, OPERATIONAL_DEFAULTS), pas le
+                    // vrai tarif par employé. Voir plus bas (billableRes) pour le calcul corrigé.
                 }
                 // Populate global monthly theoretical hours & budgets
                 monthlyTheo[mIdx] = parseFloat(row.heures_theoriques) || 168;
@@ -513,12 +595,20 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // Process billable hours
+        // Process billable hours — sert aussi de base au CA réalisé (voir ci-dessous)
         billableRes.rows.forEach(row => {
             const empName = empNameMap[row.employee_id];
             const mIdx = row.mois - 1;
             if (empName && mIdx >= 0 && mIdx < 12) {
-                collab[empName].billable[mIdx] = parseFloat(row.hours) || 0;
+                const hours = parseFloat(row.hours) || 0;
+                collab[empName].billable[mIdx] = hours;
+                // CA réalisé = heures facturables réelles × tarif réel de l'employé (prix de
+                // vente Odoo, ou tarif fixe hr_employee, ou tarif horaire par défaut en dernier
+                // recours) — remplace l'ancien ca_realise_chf de l'ETL qui appliquait un tarif
+                // fixe (180 CHF) identique à tout le monde, sans lien avec le vrai prix facturé.
+                const tarifEmp = empTarifMap[row.employee_id] || empPriceMap[row.employee_id]
+                    || parseFloat(synthese.tarif_horaire_chf) || 180;
+                collab[empName].ca_real[mIdx] = Math.round(hours * tarifEmp * 100) / 100;
             }
         });
 
@@ -549,11 +639,12 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // Process non-facturable categories breakdown
+        // Process non-facturable categories breakdown, par mois
         nonFactRes.rows.forEach(row => {
             const empName = empNameMap[row.employee_id];
-            if (empName && collab[empName] && collab[empName].non_fact[row.category] !== undefined) {
-                collab[empName].non_fact[row.category] = parseFloat(row.hours) || 0;
+            const mIdx = row.mois - 1;
+            if (empName && collab[empName] && mIdx >= 0 && mIdx < 12 && collab[empName].non_fact[row.category] !== undefined) {
+                collab[empName].non_fact[row.category][mIdx] = parseFloat(row.hours) || 0;
             }
         });
 
@@ -571,15 +662,22 @@ export async function getDashboardData(req: Request, res: Response) {
         });
 
         // Compute global average tarif (so_line → xx_hourly_price → default)
+        // Même priorité que tarif_moyen ci-dessus : xx_hourly_price (référence RH) avant la
+        // moyenne de vente réelle.
         const tarifValues = employees
-            .map(emp => empTarifMap[emp.id] || empPriceMap[emp.id] || 0)
+            .map(emp => empPriceMap[emp.id] || empTarifMap[emp.id] || 0)
             .filter(v => v > 0);
         const tarifGlobal = tarifValues.length > 0
             ? Math.round(tarifValues.reduce((s, v) => s + v, 0) / tarifValues.length)
             : (parseFloat(synthese.tarif_horaire_chf) || 180);
 
-        // Compute holidays & theoretical hours for the year
-        const feries = computeVaudHolidays(annee);
+        // Compute holidays & theoretical hours for the year — dérivé des dates déjà résolues
+        // plus haut (Odoo si disponible, sinon formule), pas d'un recalcul indépendant.
+        const feries = holidaysToMonthly(holidayDates);
+        // Année complète, TOUTES les dates officielles (même week-end) — sert uniquement à
+        // "Jours fériés calculés" du panneau Synthèse (un décompte informatif du calendrier,
+        // distinct de theoFullYear qui ne déduit que les fériés tombant un jour ouvré).
+        const feriesFullYear = holidaysToMonthly(holidayDatesRawFullYear);
         // Référence 1 employé plein temps (8h/j, jours ouvrés − fériés) — dénominateur de l'ETP
         const refTheo = computeMonthlyTheo(annee, feries.parMois);
 
@@ -613,6 +711,7 @@ export async function getDashboardData(req: Request, res: Response) {
                 hours_repartition,
                 synthese: { ...synthese, tarif_horaire_moyen: tarifGlobal },
                 feries,
+                feriesFullYear,
                 theoMensuel,
                 etpMensuel,
                 // Référence brute (1 employé plein temps, net fériés) — exposée pour que le

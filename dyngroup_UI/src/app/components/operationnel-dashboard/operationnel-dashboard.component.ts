@@ -146,10 +146,13 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // Jours fériés retirés du calcul (voir ferieHours plus haut) — on garde uniquement
         // joursFeriesCalcules à titre informatif dans le panneau de synthèse (ne nourrit
         // plus aucun calcul), on ne peuple plus _feriePP/ferieHours.
-        if (this.globalData.feries) {
+        if (this.globalData.feriesFullYear) {
           // this._feriePP = [...this.globalData.feries.parMois];
           // this.ferieHours = [...this._feriePP];
-          this.joursFeriesCalcules = this.globalData.feries.totalHeures;
+          // Année complète (pas "à ce jour") — cohérent avec heuresTheoAnnuelles, vérifié
+          // contre une feuille de référence RH (10 jours fériés/an = 80h pour un employé
+          // présent toute l'année, contre 6 jours/48h si on s'arrête à aujourd'hui).
+          this.joursFeriesCalcules = this.globalData.feriesFullYear.totalHeures;
         } else {
           // this._feriePP = Array(12).fill(0);
           // this.ferieHours = Array(12).fill(0);
@@ -321,16 +324,20 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // Compute annual CA budget from per-employee data
     let caBudgetAnnuelCalcule = 0;
 
+    // Filtre département (cumulable avec le filtre collaborateur), calculé une seule fois et
+    // réutilisé aussi pour la synthèse annuelle (H. théoriques, H. productives, H. facturables
+    // potentielles, Solde vacances) — avant cette correction, ces 4 valeurs ignoraient le
+    // département et étaient toujours calculées sur l'effectif total de l'entreprise.
+    const collabNamesDept = Object.keys(this.collabData).filter(name =>
+      this.activeDepartment === 'all' || this.deptBucket(name) === this.activeDepartment
+    );
+
     if (this.activeCollab === 'all') {
       this.caBudget = Array(12).fill(0);
 
       this.tarifHoraire = this.globalData.synthese?.tarif_horaire_moyen || parseFloat(this.globalData.synthese?.tarif_horaire_chf) || 180;
 
-      // Filtre département (cumulable avec le filtre collaborateur) : ne garder que les
-      // employés du groupe sélectionné avant d'agréger (Administration / Autre).
-      const collabNames = Object.keys(this.collabData).filter(name =>
-        this.activeDepartment === 'all' || this.deptBucket(name) === this.activeDepartment
-      );
+      const collabNames = collabNamesDept;
       if (collabNames.length > 0) {
         const theoAll = Array(12).fill(0);
         collabNames.forEach(name => {
@@ -385,16 +392,44 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.caBudgetAnnuel = caBudgetAnnuelCalcule;
     this.caMoyenMensuel = caBudgetAnnuelCalcule / 12;
 
-    // Per-employee vacation balance (per-person for synthesis)
-    const nCollab = this.activeCollab === 'all' ? Object.keys(this.collabData).length || 1 : 1;
-    this.soldeVacances = vacInit / nCollab;
-    // Theo annuel de la vue courante (Σ employés ou individu) → ramené par personne pour la synthèse
+    // Per-employee vacation balance (per-person for synthesis) — nCollab = effectif du groupe
+    // FILTRÉ par département (collabNamesDept), pas l'effectif total de l'entreprise : corrige
+    // l'incohérence numérateur (déjà filtré) / dénominateur (ne l'était pas) sur Solde vacances.
+    const nCollab = this.activeCollab === 'all' ? (collabNamesDept.length || 1) : 1;
+    // Solde vacances = solde RESTANT (allocation − déjà pris), pas l'allocation brute — vérifié
+    // sur AGACHII Igor : 176h allouées − 136h déjà prises (fev→août) = 40h, exactement le
+    // "Solde heure vacances" de la feuille de référence RH. Avant cette correction, le champ
+    // affichait l'allocation brute (176h), ce qui contredisait son propre nom ("solde").
+    const vacPrisTotal = vac.reduce((a, v) => a + v, 0);
+    this.soldeVacances = (vacInit - vacPrisTotal) / nCollab;
+    // Theo annuel = ANNÉE COMPLÈTE (theoFullYear, pas theo "à ce jour") du groupe filtré
+    // (département + collaborateur). Vérifié sur Igor : notre "à ce jour" donnait 1'384h contre
+    // 2'016h sur la feuille de référence (l'année entière, y compris les mois futurs en
+    // projection) — theoFullYear ne coupe pas à aujourd'hui, contrairement à theo (utilisé par
+    // le graphique mensuel, qui doit lui rester "à ce jour").
     const theoAnnuelView = this.activeCollab === 'all'
-      ? Object.values(this.collabData).reduce((s, c: any) => s + (c.theo ? c.theo.reduce((a: number, v: number) => a + v, 0) : 0), 0)
-      : (this.collabData[this.activeCollab]?.theo ? this.collabData[this.activeCollab].theo.reduce((a: number, v: number) => a + v, 0) : 0);
+      ? collabNamesDept.reduce((s, name) => {
+          const c = this.collabData[name];
+          return s + (c.theoFullYear ? c.theoFullYear.reduce((a: number, v: number) => a + v, 0) : 0);
+        }, 0)
+      : (this.collabData[this.activeCollab]?.theoFullYear
+          ? this.collabData[this.activeCollab].theoFullYear.reduce((a: number, v: number) => a + v, 0)
+          : 0);
+    // H. théoriques annuelles = total du groupe actuellement filtré (département + collaborateur)
+    // — avant cette correction, cette valeur venait d'un total figé sur toute l'entreprise
+    // (globalData.theoMensuel.totalAnnuel), jamais recalculé par les filtres.
+    this.heuresTheoAnnuelles = theoAnnuelView;
+
     const theoPerPerson = this.activeCollab === 'all' && nCollab > 1 ? theoAnnuelView / nCollab : theoAnnuelView;
     this.heuresProductives = theoPerPerson - this.soldeVacances;
-    this.heuresFactPotentielles = theoPerPerson - this.soldeVacances - this.joursFeriesCalcules;
+    // H. facturables potentielles = H. productives moins les absences réelles déjà connues
+    // (maladie + autres absences), moyenne par personne sur le groupe filtré. Remplace l'ancienne
+    // soustraction de joursFeriesCalcules : celle-ci doublait une déduction déjà faite dans le
+    // calcul du théorique par employé (computeTheoMensuelEmployee est déjà net des fériés
+    // vaudois tombant dans la fenêtre de présence de chaque employé).
+    const malAnnuel = mal.reduce((a, v) => a + v, 0);
+    const absAnnuel = abs_.reduce((a, v) => a + v, 0);
+    this.heuresFactPotentielles = this.heuresProductives - (malAnnuel + absAnnuel) / nCollab;
 
     this.filteredRealHours = real;
     this.filteredCaReal = car;
@@ -673,10 +708,15 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         const activeMonthIndex = isAllMonths ? -1 : parseInt(this.activeMonth);
         const months = isAllMonths ? Math.max(0, this.maxMonthIndex + 1) : 1;
 
-        const ecartsAll = this.filteredCaReal.slice(0, months).map((v, i) => v > 0 ? v - this.caBudget[i] : null);
+        // Un mois sans budget réel (caBudget = 0, aucune donnée Odoo saisie pour ce périmètre)
+        // ne peut pas produire un "écart" valide — sinon tout le CA réalisé apparaît à tort
+        // comme un dépassement de 100%. On traite ces mois comme sans donnée (null) plutôt
+        // que de comparer à un budget à zéro.
+        const ecartsAll = this.filteredCaReal.slice(0, months).map((v, i) =>
+          (v > 0 && this.caBudget[i] > 0) ? v - this.caBudget[i] : null);
         let runningCA = 0;
         const cumCAAll = this.filteredCaReal.slice(0, months).map((v, i) => {
-          if (v === 0) return null;
+          if (v === 0 || this.caBudget[i] === 0) return null;
           runningCA += v - this.caBudget[i];
           return runningCA;
         });
@@ -776,24 +816,30 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       if (ctx) {
         let nf = { admin: 0, vacances: 0, rh_it: 0, marketing: 0, formation: 0, maladie: 0 };
 
-        if (this.activeCollab === 'all') {
-          Object.values(this.collabData).forEach(c => {
-            if (c.non_fact) {
-              Object.keys(nf).forEach(k => {
-                const key = k as keyof typeof nf;
-                nf[key] += c.non_fact[key] || 0;
-              });
-            }
-          });
-        } else if (this.collabData[this.activeCollab]) {
-          const c = this.collabData[this.activeCollab];
-          if (c.non_fact) {
+        // Mois retenus : un seul mois sélectionné, ou tous les mois écoulés — même logique
+        // que les autres graphiques/tableaux (maxMonthIndex borne à aujourd'hui).
+        const maxIdx = Math.max(0, this.maxMonthIndex);
+        const monthIndices = this.activeMonth === 'all'
+          ? Array.from({ length: maxIdx + 1 }, (_, i) => i)
+          : [parseInt(this.activeMonth)];
+
+        // Collaborateurs retenus : filtre département (cumulable) + filtre collaborateur,
+        // même logique que calculateData().
+        const collabNames = this.activeCollab === 'all'
+          ? Object.keys(this.collabData).filter(name =>
+              this.activeDepartment === 'all' || this.deptBucket(name) === this.activeDepartment)
+          : (this.collabData[this.activeCollab] ? [this.activeCollab] : []);
+
+        collabNames.forEach(name => {
+          const c = this.collabData[name];
+          if (c?.non_fact) {
             Object.keys(nf).forEach(k => {
               const key = k as keyof typeof nf;
-              nf[key] = c.non_fact[key] || 0;
+              const arr: number[] = c.non_fact[key] || [];
+              monthIndices.forEach(i => { nf[key] += arr[i] || 0; });
             });
           }
-        }
+        });
 
         const labels = ['Administratif', 'Vacances', 'RH / IT', 'Marketing', 'Formation', 'Maladie'];
         const values = [nf.admin, nf.vacances, nf.rh_it, nf.marketing, nf.formation, nf.maladie];
