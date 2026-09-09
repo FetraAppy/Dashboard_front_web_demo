@@ -224,7 +224,10 @@
       <div class="card" style="padding: 20px;">
         <div class="chart-title">Tableau de suivi mensuel détaillé</div>
         <div class="chart-subtitle">Heures, effort, budget et ressources par mois</div>
-        
+        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+          Les heures de jours fériés ont été soustraites pour obtenir ces résultats.
+        </div>
+
         <div class="table-wrapper">
           <table class="data-table">
             <thead>
@@ -270,19 +273,19 @@
                   </td> désactivé — jours fériés retirés du calcul -->
                   <!-- <td style="text-align: right; font-weight: 600;">{{ caBudget[i] > 0 ? formatNumber(caBudget[i]) : '—' }}</td> désactivé sur demande -->
                   <td style="text-align: right;">
-                    <span *ngIf="filteredBillableHours[i] > 0">{{ formatHours(filteredBillableHours[i]) }}</span>
-                    <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
+                    <span *ngIf="filteredProductifHours[i] > 0">{{ formatHours(filteredProductifHours[i]) }}</span>
+                    <span *ngIf="filteredProductifHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
                   <td style="text-align: right;">
-                    <span *ngIf="filteredBillableHours[i] > 0" class="bdg"
-                          [class.bdg-pos]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) >= kpiObjectifProductivite"
-                          [class.bdg-neu]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) >= kpiObjectifProductivite * 0.93 && (filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) < kpiObjectifProductivite"
-                          [class.bdg-neg]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) < kpiObjectifProductivite * 0.93">
-                      {{ gen(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) }}%
+                    <span *ngIf="filteredRealHours[i] > 0" class="bdg"
+                          [class.bdg-pos]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= kpiObjectifProductivite"
+                          [class.bdg-neu]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= kpiObjectifProductivite * 0.93 && (filteredProductifHours[i] / filteredRealHours[i] * 100) < kpiObjectifProductivite"
+                          [class.bdg-neg]="(filteredProductifHours[i] / filteredRealHours[i] * 100) < kpiObjectifProductivite * 0.93">
+                      {{ gen(filteredProductifHours[i] / filteredRealHours[i] * 100) }}%
                     </span>
-                    <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
+                    <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
-                  <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td> 
+                  <td style="text-align: right; color: var(--text-secondary);">{{ gen(etpMonthly[i]) }}</td>
                   <!-- <td style="text-align: right; color: var(--text-secondary);">{{ gen((filteredRealHours[i]/theoHours[i]*100)/100)  }}</td> -->
                 </tr>
               </ng-container> 

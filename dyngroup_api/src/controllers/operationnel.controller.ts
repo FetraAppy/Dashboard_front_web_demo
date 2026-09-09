@@ -51,8 +51,9 @@ function isWeekend(d: Date): boolean {
  * utilisé pour les totaux annuels du panneau Synthèse (H. théoriques annuelles, Jours
  * fériés calculés), qui doivent représenter l'année entière, pas "à ce jour" (vérifié
  * contre une feuille de référence RH : ces totaux couvrent les 12 mois même en cours d'année).
- * Base commune pour computeVaudHolidays (référence 1 personne) et
- * computeTheoMensuelEmployee (prorata réel par employé).
+ * Base commune pour holidaysToMonthly (référence 1 personne) et computeTheoMensuelEmployee
+ * (prorata réel par employé) — calcul de repli quand Odoo n'a pas le calendrier réel de l'année
+ * (voir resolveOdooHolidayEntries plus bas). Vaud uniquement, pas de variante Genève en secours.
  */
 function getVaudHolidayDates(year: number, toDate: boolean = true): Date[] {
     const paques = computEaster(year);
@@ -86,43 +87,72 @@ function holidaysToMonthly(dates: Date[]): { parMois: number[]; totalHeures: num
     return { parMois, totalHeures };
 }
 
-function computeVaudHolidays(year: number, toDate: boolean = true): { parMois: number[]; totalHeures: number } {
-    return holidaysToMonthly(getVaudHolidayDates(year, toDate));
+// Canton de travail d'un employé — détermine quels jours fériés s'appliquent (voir
+// holidayDatesForCanton ci-dessous). Dérivé de hr_employee.work_location_name.
+type Canton = 'VD' | 'GE';
+
+/**
+ * "Plan-les-Ouates" = Genève ; tout le reste (Lausanne, Echichens, ou lieu non renseigné) =
+ * Vaud par défaut (canton majoritaire chez DYN — 27+5 employés sur 51 contre 9 à Genève).
+ */
+function cantonFromWorkLocation(loc: string | null | undefined): Canton {
+    if (loc && loc.trim().toLowerCase() === 'plan-les-ouates') return 'GE';
+    return 'VD';
 }
 
-// Libellés de resource.calendar.leaves connus comme n'étant PAS des fériés vaudois, à exclure.
-// Repéré en explorant les données réelles Odoo : "Jeûne genevois" est un férié du canton de
-// Genève, pas de Vaud. À compléter si d'autres cas apparaissent (voir docs/JOURS_FERIES_ODOO.md).
-const NON_VAUD_HOLIDAY_NAMES = ['Jeûne genevois'];
+// Classification des jours fériés Odoo (resource.calendar.leaves) par canton. Tout libellé
+// absent des 2 listes ci-dessous est considéré commun aux deux cantons (fériés fédéraux/suisses
+// et jours offerts par l'entreprise, ex. "Nouvel An - jour offert par DYN"). Confirmé par
+// recoupement avec une feuille de référence RH (AGACHII Igor, basé à Lausanne/VD) : "Restauration
+// de la République" y est compté comme jour commun, pas comme un jour exclusivement genevois,
+// malgré son origine historique genevoise — décision utilisateur du 2026-09-09.
+const GENEVA_ONLY_HOLIDAY_NAMES = ['Jeûne genevois'];
+const VAUD_ONLY_HOLIDAY_NAMES = ['Lundi du Jeûne'];
 
 /**
  * Jours fériés réels de l'année, lus depuis le vrai calendrier Odoo
- * (staging.resource_calendar_leaves), dédupliqués par date — chaque jour férié existe en 5 à 6
- * exemplaires identiques dans Odoo (imports répétés) — et filtrés sur les congés globaux
- * (resource_id vide, hors congés individuels) en excluant les libellés non-vaudois connus.
- * Renvoie TOUTES les dates officielles, y compris celles tombant un week-end (ex. 1er août 2026
- * tombe un samedi) : c'est à l'appelant de filtrer par jour de semaine selon le besoin (info
- * calendrier brute vs déduction réelle des heures théoriques).
+ * (staging.resource_calendar_leaves), dédupliqués par (date, libellé) — chaque jour férié existe
+ * en 5 à 6 exemplaires identiques dans Odoo (imports répétés) — filtrés sur les congés globaux
+ * uniquement (resource_id vide, hors congés individuels). Renvoie le nom ET la date de chaque
+ * entrée : la classification par canton (holidayDatesForCanton) se fait ensuite, pas ici.
  * Renvoie null si la table n'existe pas encore, ou si Odoo n'a aucune donnée pour cette année
  * (constaté pour 2025 et les années antérieures — seules 2026/2027 sont paramétrées à ce jour) :
- * dans ce cas, l'appelant doit retomber sur getVaudHolidayDates() (calcul par formule).
+ * dans ce cas, l'appelant doit retomber sur getVaudHolidayDates() (calcul par formule, Vaud
+ * uniquement — pas de variante Genève disponible en secours).
  */
-async function resolveOdooHolidayDates(annee: number): Promise<Date[] | null> {
+async function resolveOdooHolidayEntries(annee: number): Promise<{ date: Date; name: string }[] | null> {
     try {
-        const placeholders = NON_VAUD_HOLIDAY_NAMES.map((_, i) => `$${i + 2}`).join(', ');
         const res = await pool.query(
-            `SELECT DISTINCT date_from::date AS d
+            `SELECT DISTINCT date_from::date AS d, name
              FROM staging.resource_calendar_leaves
              WHERE (resource_id IS NULL OR resource_id::text IN ('', 'False'))
-               AND name NOT IN (${placeholders})
                AND EXTRACT(YEAR FROM date_from::date) = $1`,
-            [annee, ...NON_VAUD_HOLIDAY_NAMES]
+            [annee]
         );
         if (res.rows.length === 0) return null;
-        return res.rows.map(r => new Date(r.d));
+        return res.rows.map(r => ({ date: new Date(r.d), name: r.name }));
     } catch (_) {
         return null; // table pas encore extraite (avant premier run du DAG stage1_hr), fallback silencieux
     }
+}
+
+/**
+ * Filtre une liste d'entrées fériées Odoo pour un canton donné, et déduplique par date (un jour
+ * comme le 31 décembre peut porter 2 libellés différents mais ne compte qu'une fois).
+ */
+function holidayDatesForCanton(entries: { date: Date; name: string }[], canton: Canton): Date[] {
+    const relevant = entries.filter(e => {
+        if (GENEVA_ONLY_HOLIDAY_NAMES.includes(e.name)) return canton === 'GE';
+        if (VAUD_ONLY_HOLIDAY_NAMES.includes(e.name)) return canton === 'VD';
+        return true; // commun aux deux cantons
+    });
+    const seen = new Set<string>();
+    const result: Date[] = [];
+    for (const e of relevant) {
+        const key = e.date.toISOString().slice(0, 10);
+        if (!seen.has(key)) { seen.add(key); result.push(e.date); }
+    }
+    return result;
 }
 
 function computeMonthlyTheo(
@@ -239,25 +269,43 @@ export async function getDashboardData(req: Request, res: Response) {
                  ORDER BY emp.name`,
                 [annee]
             ),
-            resolveOdooHolidayDates(annee)
+            resolveOdooHolidayEntries(annee)
         ]);
 
-        // Jours fériés : source réelle Odoo si disponible pour l'année demandée (dédupliquée,
-        // hors libellés non-vaudois), sinon calcul par formule (getVaudHolidayDates). Voir
-        // docs/JOURS_FERIES_ODOO.md pour le détail de cette décision.
-        let holidayDates: Date[];             // fériés ouvrés, "à ce jour" — graphiques/tableaux mensuels
-        let holidayDatesFullYear: Date[];     // fériés ouvrés, année complète — H. théoriques annuelles
-        let holidayDatesRawFullYear: Date[];  // TOUTES les dates officielles (même week-end) — Jours fériés calculés
-        if (odooHolidays) {
-            const weekdaysOnly = odooHolidays.filter(h => !isWeekend(h));
-            holidayDates = weekdaysOnly.filter(h => h <= now);
-            holidayDatesFullYear = weekdaysOnly;
-            holidayDatesRawFullYear = odooHolidays;
-        } else {
-            holidayDates = getVaudHolidayDates(annee);
-            holidayDatesFullYear = getVaudHolidayDates(annee, false);
-            holidayDatesRawFullYear = holidayDatesFullYear;
+        type HolidaySet = {
+            toDate: Date[];         // fériés ouvrés, "à ce jour" — graphiques/tableaux mensuels
+            fullYear: Date[];       // fériés ouvrés, année complète — H. théoriques annuelles
+            rawFullYear: Date[];    // TOUTES les dates officielles (même week-end) — Jours fériés calculés
+        };
+
+        /**
+         * Résout le jeu de jours fériés applicable à un canton donné : source réelle Odoo si
+         * disponible pour l'année demandée (dédupliquée, classée par canton), sinon calcul par
+         * formule (getVaudHolidayDates — Vaud uniquement, pas de variante Genève en secours).
+         * Voir docs/JOURS_FERIES_ODOO.md pour le détail de cette décision.
+         */
+        function resolveHolidaySet(canton: Canton): HolidaySet {
+            if (odooHolidays) {
+                const relevant = holidayDatesForCanton(odooHolidays, canton);
+                const weekdaysOnly = relevant.filter(h => !isWeekend(h));
+                return {
+                    toDate: weekdaysOnly.filter(h => h <= now),
+                    fullYear: weekdaysOnly,
+                    rawFullYear: relevant,
+                };
+            }
+            const fullYear = getVaudHolidayDates(annee, false);
+            return { toDate: getVaudHolidayDates(annee), fullYear, rawFullYear: fullYear };
         }
+
+        const holidaysByCanton: Record<Canton, HolidaySet> = {
+            VD: resolveHolidaySet('VD'),
+            GE: resolveHolidaySet('GE'),
+        };
+        // Jeu par défaut (Vaud) pour les totaux company-wide qui n'ont pas de notion de canton
+        // (référence ETP 1 employé plein temps, panneau Synthèse) — inchangé par rapport à avant.
+        const holidayDates = holidaysByCanton.VD.toDate;
+        const holidayDatesRawFullYear = holidaysByCanton.VD.rawFullYear;
 
         const synthese = syntheseRes.rows[0] || {
             annee,
@@ -366,6 +414,22 @@ export async function getDashboardData(req: Request, res: Response) {
             // Table may not have the field yet
         }
 
+        // Canton de travail par employé (Vaud/Genève), pour choisir le bon jeu de jours fériés
+        // (holidaysByCanton ci-dessus). Requête à part et défensive : work_location_name n'est
+        // pas encore extrait tant que stage1_hr n'a pas tourné avec ce nouveau champ — dans ce
+        // cas, tout le monde retombe sur Vaud (comportement identique à avant cette fonctionnalité).
+        const empCantonMap: Record<number, Canton> = {};
+        try {
+            const cantonRes = await pool.query(
+                `SELECT id, work_location_name FROM staging.hr_employee WHERE work_location_name IS NOT NULL`
+            );
+            cantonRes.rows.forEach(r => {
+                empCantonMap[r.id] = cantonFromWorkLocation(r.work_location_name);
+            });
+        } catch (_) {
+            // Colonne pas encore extraite (avant le prochain run de stage1_hr) — fallback Vaud
+        }
+
         // Query ETP (taux d'activité individuel, ex. 0.8 pour un 80%) depuis le contrat actif.
         // DISTINCT ON sans second critère de tri était non-déterministe : si un employé a
         // plusieurs lignes hr_contract à l'état 'open', Postgres pouvait piocher n'importe
@@ -398,15 +462,19 @@ export async function getDashboardData(req: Request, res: Response) {
             const annualBudget = empBudgetMap[emp.id] || parseFloat(synthese.ca_budget_annuel_chf) || 0;
             const monthlyBudget = annualBudget / 12;
             const vacInitH = empVacMap[emp.id] || 0;
+            const canton = empCantonMap[emp.id] || 'VD';
+            const holidays = holidaysByCanton[canton];
             empNameMap[emp.id] = emp.name;
             collab[emp.name] = {
                 real: Array(12).fill(0),
                 ca_real: Array(12).fill(0),
                 billable: Array(12).fill(0),
-                theo: computeTheoMensuelEmployee(emp, annee, holidayDates),
+                productif: Array(12).fill(0),
+                theo: computeTheoMensuelEmployee(emp, annee, holidays.toDate),
                 // Théorique année complète (pas de coupure à aujourd'hui) — sert uniquement à
                 // "H. théoriques annuelles" du panneau Synthèse (voir toDate=false ci-dessus).
-                theoFullYear: computeTheoMensuelEmployee(emp, annee, holidayDatesFullYear, false),
+                theoFullYear: computeTheoMensuelEmployee(emp, annee, holidays.fullYear, false),
+                canton,
                 ca_bud: Array(12).fill(monthlyBudget),
                 ca_budget_annuel: annualBudget,
                 vac_m: Array(12).fill(0),
@@ -435,7 +503,7 @@ export async function getDashboardData(req: Request, res: Response) {
         ).sort();
 
         // 3-8. Run the 7 independent queries (tracking, billable, vacations, illnesses, absences, non-facturable, repartition) in parallel
-        const [trackingRes, billableRes, vacRes, malRes, absRes, nonFactRes, repartitionRes] = await Promise.all([
+        const [trackingRes, billableRes, vacRes, malRes, absRes, nonFactRes, repartitionRes, realHoursRes] = await Promise.all([
             // 3. Monthly hours & ca tracking
             pool.query(
                 `SELECT employee_id, mois, heures_realisees, ca_realise_chf, ca_budget_chf, heures_theoriques
@@ -565,33 +633,96 @@ export async function getDashboardData(req: Request, res: Response) {
             ),
             // 9. Global hours repartition by month
             pool.query(
-                `SELECT period_key, categorie, SUM(heures) as heures 
-                 FROM kpi.operationnel_heures_repartition 
+                `SELECT period_key, categorie, SUM(heures) as heures
+                 FROM kpi.operationnel_heures_repartition
                  WHERE period_key LIKE $1 || '-%'
                  GROUP BY period_key, categorie
                  ORDER BY period_key, categorie`,
                 [`${annee}`]
+            ),
+            // 10. Heures réalisées mensuelles par employé, HORS jours fériés — remplace la
+            // colonne heures_realisees de kpi.operationnel_suivi_mensuel, qui sommait aussi les
+            // lignes "Congé (N/M)" à amount=0 générées automatiquement par Odoo pour les jours
+            // fériés d'entreprise (voir docs/JOURS_FERIES_ODOO.md) : ce ne sont pas des heures
+            // de travail, elles gonflaient artificiellement les heures réalisées de tout le monde.
+            pool.query(
+                `SELECT employee_id, EXTRACT(MONTH FROM date::date)::int AS mois, SUM(unit_amount) AS hours
+                 FROM staging.account_analytic_line
+                 WHERE date IS NOT NULL AND employee_id IS NOT NULL
+                   AND EXTRACT(YEAR FROM date::date) = $1
+                   AND NOT (name LIKE 'Congé (%' AND amount = 0)
+                 GROUP BY employee_id, mois`,
+                [annee]
             )
         ]);
+
+        // 11. Heures "productives" par employé/mois — nouvelle règle métier (2026-09-09) :
+        // un timesheet est non-productif d'office si son projet est interne (nom contenant
+        // "dyn" ou "interne", insensible à la casse — voir note ci-dessous sur pourquoi
+        // "contient" plutôt que "préfixe strict") ; sinon on se fie au champ Odoo
+        // account_analytic_line.productivity (booléen "Productivité"). Hors fériés, comme
+        // pour "heures réalisées" ci-dessus.
+        // Note sur le choix "contient" vs préfixe : un préfixe strict raterait "Support interne"
+        // et "CLIENT DYN SA - INTERNE" (qui ne commencent pas par ces mots). Vérifié sur les
+        // ~200 projets réels : aucun vrai client n'a "dyn" ou "interne" dans son nom à part les
+        // projets internes eux-mêmes.
+        // Défensif : `productivity` n'est pas encore extrait tant que stage1_project n'a pas
+        // tourné avec ce nouveau champ (voir kpi_fields.py) — en attendant, on retombe sur
+        // l'ancienne définition (heures facturables, amount<0) pour ne pas casser l'affichage.
+        let productifRes: { rows: { employee_id: number; mois: number; hours: string }[] } | null = null;
+        try {
+            productifRes = await pool.query(
+                `SELECT aal.employee_id, EXTRACT(MONTH FROM aal.date::date)::int AS mois,
+                        SUM(aal.unit_amount) AS hours
+                 FROM staging.account_analytic_line aal
+                 LEFT JOIN staging.project_project p ON p.id = aal.project_id
+                 WHERE aal.date IS NOT NULL AND aal.employee_id IS NOT NULL
+                   AND EXTRACT(YEAR FROM aal.date::date) = $1
+                   AND NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)
+                   AND (p.id IS NULL OR (LOWER(p.name) NOT LIKE '%dyn%' AND LOWER(p.name) NOT LIKE '%interne%'))
+                   AND aal.productivity = true
+                 GROUP BY aal.employee_id, mois`,
+                [annee]
+            );
+        } catch (_) {
+            productifRes = null; // colonne productivity pas encore extraite — fallback plus bas
+        }
 
         // Build dynamic lists for global budget & theoretical hours
         const monthlyTheo = Array(12).fill(168);
         const monthlyBudget = Array(12).fill(0);
 
         trackingRes.rows.forEach(row => {
-            const empName = empNameMap[row.employee_id];
             const mIdx = row.mois - 1;
             if (mIdx >= 0 && mIdx < 12) {
-                // Populate employee-specific values (theo = calendrier/prorata, calculé ci-dessus)
-                if (empName) {
-                    collab[empName].real[mIdx] = parseFloat(row.heures_realisees) || 0;
-                    // ca_real n'est plus lu depuis ca_realise_chf : cette colonne est calculée
-                    // à l'ETL avec un tarif horaire FIXE (180 CHF, OPERATIONAL_DEFAULTS), pas le
-                    // vrai tarif par employé. Voir plus bas (billableRes) pour le calcul corrigé.
-                }
+                // real n'est plus lu depuis heures_realisees (voir realHoursRes ci-dessous) : cette
+                // colonne de kpi.operationnel_suivi_mensuel sommait aussi les jours fériés.
+                // ca_real n'est plus lu depuis ca_realise_chf : cette colonne est calculée
+                // à l'ETL avec un tarif horaire FIXE (180 CHF, OPERATIONAL_DEFAULTS), pas le
+                // vrai tarif par employé. Voir plus bas (billableRes) pour le calcul corrigé.
                 // Populate global monthly theoretical hours & budgets
                 monthlyTheo[mIdx] = parseFloat(row.heures_theoriques) || 168;
                 monthlyBudget[mIdx] = parseFloat(row.ca_budget_chf) || 0;
+            }
+        });
+
+        // Heures réalisées, hors fériés (voir requête 10 ci-dessus)
+        realHoursRes.rows.forEach(row => {
+            const empName = empNameMap[row.employee_id];
+            const mIdx = row.mois - 1;
+            if (empName && mIdx >= 0 && mIdx < 12) {
+                collab[empName].real[mIdx] = parseFloat(row.hours) || 0;
+            }
+        });
+
+        // Heures productives (voir requête 11 ci-dessus). Fallback tant que `productivity`
+        // n'est pas extrait : ancienne définition (heures facturables, amount<0) — remplacée
+        // automatiquement dès que stage1_project aura tourné avec le nouveau champ.
+        (productifRes ? productifRes.rows : billableRes.rows).forEach(row => {
+            const empName = empNameMap[row.employee_id];
+            const mIdx = row.mois - 1;
+            if (empName && mIdx >= 0 && mIdx < 12) {
+                collab[empName].productif[mIdx] = parseFloat(row.hours) || 0;
             }
         });
 

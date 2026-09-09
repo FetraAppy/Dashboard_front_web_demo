@@ -70,6 +70,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   filteredRealHours: number[] = [];
   filteredCaReal: number[] = [];
   filteredBillableHours: number[] = [];
+  filteredProductifHours: number[] = [];
   absencesMonth: number[] = [];
   vacationsMonth: number[] = [];
   sicknessMonth: number[] = [];
@@ -316,6 +317,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     let real = Array(12).fill(0);
     let car = Array(12).fill(0);
     let billable = Array(12).fill(0);
+    let productif = Array(12).fill(0);
     let abs_ = Array(12).fill(0);
     let vac = Array(12).fill(0);
     let mal = Array(12).fill(0);
@@ -345,6 +347,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           c.real.forEach((v: number, i: number) => real[i] += v);
           c.ca_real.forEach((v: number, i: number) => car[i] += v);
           if (c.billable) c.billable.forEach((v: number, i: number) => billable[i] += v);
+          if (c.productif) c.productif.forEach((v: number, i: number) => productif[i] += v);
           if (c.abs_m) c.abs_m.forEach((v: number, i: number) => abs_[i] += v);
           if (c.theo) c.theo.forEach((v: number, i: number) => theoAll[i] += v);
           c.vac_m.forEach((v: number, i: number) => vac[i] += v);
@@ -370,6 +373,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       real = [...c.real];
       car = [...c.ca_real];
       billable = c.billable ? [...c.billable] : Array(12).fill(0);
+      productif = c.productif ? [...c.productif] : Array(12).fill(0);
       abs_ = c.abs_m ? [...c.abs_m] : Array(12).fill(0);
       vac = [...c.vac_m];
       mal = [...c.mal_m];
@@ -434,6 +438,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.filteredRealHours = real;
     this.filteredCaReal = car;
     this.filteredBillableHours = billable;
+    this.filteredProductifHours = productif;
     this.absencesMonth = abs_;
     this.vacationsMonth = vac;
     this.sicknessMonth = mal;
