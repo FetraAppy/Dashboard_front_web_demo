@@ -400,7 +400,7 @@
           </thead>
           <tbody>
             <ng-container *ngFor="let m of monthNames; let i = index">
-              <tr *ngIf="(activeMonth === 'all' || activeMonth === i.toString()) && i <= maxMonthIndex">
+              <tr *ngIf="activeMonth === 'all' || activeMonth === i.toString()">
                 <td><strong>{{ m }}</strong></td>
                 <td style="text-align: right;">
                   <!-- Avant : (filteredRealHours[i] - (theoHours[i] - ferieHours[i])) — désactivé, jours fériés retirés du calcul -->
