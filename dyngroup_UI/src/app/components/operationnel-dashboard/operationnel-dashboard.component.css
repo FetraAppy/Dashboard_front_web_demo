@@ -92,6 +92,19 @@
 .info.ip { border-left-color: var(--rh); }
 .info.io { border-left-color: var(--assure); }
 
+/* Sépare visuellement les groupes de statistiques du panneau "Paramètres & Synthèse" — sans
+   ça, la valeur d'une colonne (ex. "180 CHF/h") touche presque le label de la colonne suivante
+   (ex. "H. productives"), ce qui donne l'impression trompeuse qu'ils vont ensemble. */
+.st-group {
+  padding-right: 16px;
+  border-right: 1px solid var(--tr-border);
+}
+
+.st-group-last {
+  padding-right: 0;
+  border-right: none;
+}
+
 .st {
   display: flex;
   justify-content: space-between;

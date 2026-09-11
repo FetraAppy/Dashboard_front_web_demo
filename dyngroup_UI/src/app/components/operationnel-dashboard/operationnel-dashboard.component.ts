@@ -404,7 +404,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
       this.caObjectifChf = c.ca_objectif_chf ? [...c.ca_objectif_chf] : Array(12).fill(0);
       caBudgetAnnuelCalcule = c.ca_budget_annuel || parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
-      if (c.tarif_moyen) this.tarifHoraire = c.tarif_moyen;
+      // tarif_effectif = CA réalisé ÷ heures réalisées de l'employé (moyenne pondérée réelle,
+      // voir backend) — plus représentatif que tarif_moyen (tarif de référence statique) quand
+      // plusieurs tarifs mensuels différents ont été appliqués dans l'année.
+      if (c.tarif_effectif) this.tarifHoraire = c.tarif_effectif;
       // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales — même
       // formule que la vue "Tous collaborateurs".
       this.etpMonthly = real.map((v, i) => this.theoHours[i] > 0 ? Math.round((v / this.theoHours[i]) * 100) / 100 : 0);

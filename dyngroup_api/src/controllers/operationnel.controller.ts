@@ -795,6 +795,14 @@ export async function getDashboardData(req: Request, res: Response) {
                 const tarif = tarifMois || c.tarif_moyen;
                 c.ca_real[m] = Math.round(c.real[m] * tarif * 100) / 100;
             }
+            // Tarif horaire "effectif" de l'employé sur l'année = CA réalisé total ÷ heures
+            // réalisées totales — reconstitue le vrai mélange des tarifs mensuels appliqués
+            // ci-dessus (peut varier d'un mois à l'autre), contrairement à tarif_moyen qui n'est
+            // qu'un tarif de référence statique (xx_hourly_price). Repli sur tarif_moyen si
+            // l'employé n'a aucune heure réalisée cette année.
+            const totalCaEmp = c.ca_real.reduce((s: number, v: number) => s + v, 0);
+            const totalHeuresEmp = c.real.reduce((s: number, v: number) => s + v, 0);
+            c.tarif_effectif = totalHeuresEmp > 0 ? Math.round((totalCaEmp / totalHeuresEmp) * 100) / 100 : c.tarif_moyen;
         });
 
         // CA objectif CHF (onglet "Objectif" de la fiche employé) — voir requête 13 ci-dessus.
@@ -857,15 +865,26 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // Compute global average tarif (so_line → xx_hourly_price → default)
-        // Même priorité que tarif_moyen ci-dessus : xx_hourly_price (référence RH) avant la
-        // moyenne de vente réelle.
+        // Tarif horaire moyen global = CA réalisé total ÷ heures réalisées totales (moyenne
+        // pondérée par les heures réellement travaillées de chaque employé) — cohérent avec le
+        // CA réalisé effectivement affiché (voir tarif_effectif ci-dessus), plutôt qu'une simple
+        // moyenne non pondérée des tarifs de référence par employé qui ignorait leur volume
+        // d'heures respectif. Repli sur cette ancienne moyenne (xx_hourly_price → prix de vente
+        // moyen → défaut) si personne n'a encore d'heures réalisées sur l'année.
+        let totalCaRealAnnuel = 0;
+        let totalHeuresRealAnnuel = 0;
+        Object.values(collab).forEach((c: any) => {
+            totalCaRealAnnuel += c.ca_real.reduce((s: number, v: number) => s + v, 0);
+            totalHeuresRealAnnuel += c.real.reduce((s: number, v: number) => s + v, 0);
+        });
         const tarifValues = employees
             .map(emp => empPriceMap[emp.id] || empTarifMap[emp.id] || 0)
             .filter(v => v > 0);
-        const tarifGlobal = tarifValues.length > 0
-            ? Math.round(tarifValues.reduce((s, v) => s + v, 0) / tarifValues.length)
-            : (parseFloat(synthese.tarif_horaire_chf) || 180);
+        const tarifGlobal = totalHeuresRealAnnuel > 0
+            ? Math.round((totalCaRealAnnuel / totalHeuresRealAnnuel) * 100) / 100
+            : (tarifValues.length > 0
+                ? Math.round(tarifValues.reduce((s, v) => s + v, 0) / tarifValues.length)
+                : (parseFloat(synthese.tarif_horaire_chf) || 180));
 
         // Compute holidays & theoretical hours for the year — dérivé des dates déjà résolues
         // plus haut (Odoo si disponible, sinon formule), pas d'un recalcul indépendant.

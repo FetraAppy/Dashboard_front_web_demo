@@ -199,19 +199,19 @@
     <div class="card">
       <div class="chart-title">Paramètres &amp; Synthèse annuelle</div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 16px;">
-        <div>
+        <div class="st-group">
           <div class="st"><span class="st-l">Tarif horaire moyen</span><span class="st-v">{{ formatNumber(tarifHoraire) }} {{ devise }}/h</span></div>
           <div class="st"><span class="st-l">H. théoriques annuelles</span><span class="st-v">{{ formatHours(heuresTheoAnnuelles) }}</span></div>
         </div>
-        <div>
+        <div class="st-group">
           <div class="st"><span class="st-l">H. productives (hors fériés)</span><span class="st-v">{{ formatHours(heuresProductives) }}</span></div>
           <div class="st"><span class="st-l">H. facturables potentielles</span><span class="st-v">{{ formatHours(heuresFactPotentielles) }}</span></div>
         </div>
-        <div>
+        <div class="st-group">
           <div class="st"><span class="st-l">Solde vacances</span><span class="st-v">{{ formatHours(soldeVacances) }} = {{ gen(soldeVacances / 8) }}j</span></div>
           <div class="st"><span class="st-l">Jours fériés calculés</span><span class="st-v">{{ formatHours(joursFeriesCalcules) }} = {{ gen(joursFeriesCalcules / 8) }}j</span></div>
         </div>
-        <div>
+        <div class="st-group st-group-last">
           <div class="st"><span class="st-l">CA budget annuel</span><span class="st-v">{{ caBudgetAnnuel > 0 ? formatNumber(caBudgetAnnuel) + ' ' + devise : '—' }}</span></div>
           <div class="st"><span class="st-l">CA moyen mensuel</span><span class="st-v">{{ caMoyenMensuel > 0 ? '≈ ' + formatNumber(caMoyenMensuel) + ' ' + devise : '—' }}</span></div>
         </div>
