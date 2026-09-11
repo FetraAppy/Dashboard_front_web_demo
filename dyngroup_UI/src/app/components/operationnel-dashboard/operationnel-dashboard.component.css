@@ -105,6 +105,19 @@
   border-right: none;
 }
 
+/* Valeur collée à son propre label (avec ":") plutôt qu'étalée à l'autre bout de la colonne —
+   évite justement la confusion "à quel label appartient cette valeur ?" du space-between par
+   défaut de .st, sur ce panneau où plusieurs colonnes se suivent côte à côte. */
+.st-group .st {
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.st-group .st-l::after {
+  content: ':';
+}
+
 .st {
   display: flex;
   justify-content: space-between;
