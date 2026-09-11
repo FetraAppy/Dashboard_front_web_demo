@@ -36,6 +36,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   monthNames = MF;
   monthShortNames = MS;
   theoHours: number[] = [];
+  // Théorique année complète (mois futurs inclus, pas de coupure à aujourd'hui) — utilisé par
+  // la colonne "H. théoriques" du tableau de suivi mensuel, qui affiche les 12 mois de l'année.
+  theoHoursFullYear: number[] = [];
   // ferieHours: number[] = []; // désactivé — jours fériés retirés du calcul (échelle
   // incohérente avec theoHours en vue "all" : ferieHours était multiplié par l'effectif
   // brut alors que theoHours est déjà prorata par employé, ex. 736h aberrant en janvier)
@@ -58,6 +61,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   etpValue = 0;
 
   baseMax = 0;
+  baseMaxFullYear = 0;
   // totalFeriesHours = 0; // désactivé — jours fériés retirés du calcul, voir ferieHours ci-dessus
   totalCaBudget = 0;
 
@@ -84,13 +88,15 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   kpiObjectifProductivite = 0;
 
   // Table summary numbers
-  totalTheoHours = 2016;
+  totalTheoHours = 0;
+  totalTheoHoursFullYear = 0;
   totalRealHours = 0;
   totalVarHours = 0;
   totalVacPris = 0;
   finalVacBalance = 0;
   totalAbsences = 0;
   totalFactHours = 0;
+  totalProductifHours = 0;
 
   // Chart instances
   private chartHeures: Chart | null = null;
@@ -342,6 +348,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       const collabNames = collabNamesDept;
       if (collabNames.length > 0) {
         const theoAll = Array(12).fill(0);
+        const theoFullYearAll = Array(12).fill(0);
         collabNames.forEach(name => {
           const c = this.collabData[name];
           c.real.forEach((v: number, i: number) => real[i] += v);
@@ -350,6 +357,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c.productif) c.productif.forEach((v: number, i: number) => productif[i] += v);
           if (c.abs_m) c.abs_m.forEach((v: number, i: number) => abs_[i] += v);
           if (c.theo) c.theo.forEach((v: number, i: number) => theoAll[i] += v);
+          if (c.theoFullYear) c.theoFullYear.forEach((v: number, i: number) => theoFullYearAll[i] += v);
           c.vac_m.forEach((v: number, i: number) => vac[i] += v);
           c.mal_m.forEach((v: number, i: number) => mal[i] += v);
           vacInit += c.vac_init || 0;
@@ -363,10 +371,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         this.etpMonthly = theoAll.map((t, i) => t > 0 ? Math.round((real[i] / t) * 100) / 100 : 0);
         // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés)
         this.theoHours = theoAll;
+        // Théorique année complète (mois futurs inclus) — pour la colonne "H. théoriques" du
+        // tableau de suivi mensuel, qui affiche désormais les 12 mois, pas seulement "à ce jour".
+        this.theoHoursFullYear = theoFullYearAll;
       } else {
         this.caBudget = this.globalData.ca_bud || [];
         caBudgetAnnuelCalcule = parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
         this.etpMonthly = Array(12).fill(0);
+        this.theoHoursFullYear = Array(12).fill(0);
       }
     } else if (this.collabData[this.activeCollab]) {
       const c = this.collabData[this.activeCollab];
@@ -379,6 +391,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       mal = [...c.mal_m];
       vacInit = c.vac_init || 0;
       this.theoHours = c.theo ? [...c.theo] : [...this._theoPP];
+      this.theoHoursFullYear = c.theoFullYear ? [...c.theoFullYear] : [...this.theoHours];
       // this.ferieHours = [...this._feriePP]; // désactivé — jours fériés retirés du calcul
 
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
@@ -455,6 +468,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     const monthIndices = this.activeMonth === 'all'
       ? Array.from({ length: Math.max(0, maxIdx + 1) }, (_, i) => i)
       : [parseInt(this.activeMonth)];
+    // Mêmes mois, mais sur l'année complète (pas limité à aujourd'hui) — pour le tableau de
+    // suivi mensuel, qui affiche désormais les 12 mois avec leur théorique complet.
+    const monthIndicesFullYear = this.activeMonth === 'all'
+      ? Array.from({ length: 12 }, (_, i) => i)
+      : [parseInt(this.activeMonth)];
 
     // Aggregates for KPIs
     this.kpiObjFact = monthIndices.reduce((s, i) => s + this.caBudget[i], 0);
@@ -467,6 +485,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
     // Table footers
     this.totalTheoHours = monthIndices.reduce((s, i) => s + this.theoHours[i], 0);
+    this.totalTheoHoursFullYear = monthIndicesFullYear.reduce((s, i) => s + (this.theoHoursFullYear[i] || 0), 0);
     this.totalRealHours = monthIndices.reduce((s, i) => s + real[i], 0);
     // ETP affiché en pied de tableau = moyenne des ETP mensuels sur la période sélectionnée
     // (un ETP mensuel, pas une somme — sommer des mois donnerait un nombre sans sens).
@@ -496,11 +515,15 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.totalAbsences = monthIndices.reduce((s, i) => s + abs_[i], 0);
 
     this.baseMax = Math.max(...this.theoHours);
+    this.baseMaxFullYear = Math.max(...this.theoHoursFullYear);
     // this.totalFeriesHours = monthIndices.reduce((s, i) => s + (this.ferieHours[i] || 0), 0); // désactivé — fériés retirés du calcul
     this.totalCaBudget = monthIndices.reduce((s, i) => s + this.caBudget[i], 0);
 
     // Heures facturables (account_analytic_line, amount < 0) — numérateur de la productivité
     this.totalFactHours = monthIndices.reduce((s, i) => s + billable[i], 0);
+    // Heures productives — nouvelle définition (compte-rendu productivity=true), utilisée par
+    // le tableau "Suivi mensuel détaillé" (H. Productivité / Taux Productivité, total).
+    this.totalProductifHours = monthIndices.reduce((s, i) => s + productif[i], 0);
 
     // Objectif de productivité dynamique : Σ H. facturables / (Σ H. théoriques − Σ absences) × 100
     const baseNette = totalTheo - this.totalAbsences;

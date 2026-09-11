@@ -245,11 +245,11 @@
             </thead>
             <tbody>
               <ng-container *ngFor="let m of monthNames; let i = index">
-                <tr *ngIf="(activeMonth === 'all' || activeMonth === i.toString()) && i <= maxMonthIndex">
+                <tr *ngIf="activeMonth === 'all' || activeMonth === i.toString()">
                   <td><strong>{{ m }}</strong></td>
                   <td style="text-align: right; width: 140px;">
-                    {{ formatHours(theoHours[i]) }}
-                    <div class="pbg"><div class="pf pf-b" [style.width.%]="(theoHours[i]/baseMax)*100"></div></div>
+                    {{ formatHours(theoHoursFullYear[i]) }}
+                    <div class="pbg"><div class="pf pf-b" [style.width.%]="(theoHoursFullYear[i]/baseMaxFullYear)*100"></div></div>
                   </td>
                   <td style="text-align: right; width: 140px;">
                     <span *ngIf="filteredRealHours[i] > 0">
@@ -293,7 +293,7 @@
             <tfoot>
               <tr style="font-weight: 700; background: var(--th-bg);">
                 <td>Total / Moy.</td>
-                <td style="text-align: right;">{{ formatHours(totalTheoHours) }}</td>
+                <td style="text-align: right;">{{ formatHours(totalTheoHoursFullYear) }}</td>
                 <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
                 <td style="text-align: right;">
                   <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
@@ -301,10 +301,10 @@
                 </td>
                 <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
                 <!-- <td style="text-align: right;">{{ formatNumber(totalCaBudget) }}</td> désactivé sur demande -->
-                <td style="text-align: right;">{{ totalFactHours > 0 ? formatHours(totalFactHours) : '—' }}</td>
+                <td style="text-align: right;">{{ totalProductifHours > 0 ? formatHours(totalProductifHours) : '—' }}</td>
                 <td style="text-align: right;">
-                  <span *ngIf="totalFactHours > 0">{{ gen(kpiObjectifProductivite) }}%</span>
-                  <span *ngIf="totalFactHours === 0">—</span>
+                  <span *ngIf="totalRealHours > 0">{{ gen(totalProductifHours / totalRealHours * 100) }}%</span>
+                  <span *ngIf="totalRealHours === 0">—</span>
                 </td>
                 <td style="text-align: right;">{{ gen(etpValue) }}</td>
               </tr>

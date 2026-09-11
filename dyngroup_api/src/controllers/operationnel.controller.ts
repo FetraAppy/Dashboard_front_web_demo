@@ -656,16 +656,11 @@ export async function getDashboardData(req: Request, res: Response) {
             )
         ]);
 
-        // 11. Heures "productives" par employé/mois — nouvelle règle métier (2026-09-09) :
-        // un timesheet est non-productif d'office si son projet est interne (nom contenant
-        // "dyn" ou "interne", insensible à la casse — voir note ci-dessous sur pourquoi
-        // "contient" plutôt que "préfixe strict") ; sinon on se fie au champ Odoo
-        // account_analytic_line.productivity (booléen "Productivité"). Hors fériés, comme
-        // pour "heures réalisées" ci-dessus.
-        // Note sur le choix "contient" vs préfixe : un préfixe strict raterait "Support interne"
-        // et "CLIENT DYN SA - INTERNE" (qui ne commencent pas par ces mots). Vérifié sur les
-        // ~200 projets réels : aucun vrai client n'a "dyn" ou "interne" dans son nom à part les
-        // projets internes eux-mêmes.
+        // 11. Heures "productives" par employé/mois — règle simplifiée le 2026-09-11 à la
+        // demande de l'utilisateur : uniquement le champ Odoo account_analytic_line.productivity
+        // (booléen "Productivité"), sans exclusion par nom de projet (l'exclusion "dyn"/"interne"
+        // a été retirée — on ne vérifie plus que productivity = true). Hors fériés, comme pour
+        // "heures réalisées" ci-dessus.
         // Défensif : `productivity` n'est pas encore extrait tant que stage1_project n'a pas
         // tourné avec ce nouveau champ (voir kpi_fields.py) — en attendant, on retombe sur
         // l'ancienne définition (heures facturables, amount<0) pour ne pas casser l'affichage.
@@ -675,11 +670,9 @@ export async function getDashboardData(req: Request, res: Response) {
                 `SELECT aal.employee_id, EXTRACT(MONTH FROM aal.date::date)::int AS mois,
                         SUM(aal.unit_amount) AS hours
                  FROM staging.account_analytic_line aal
-                 LEFT JOIN staging.project_project p ON p.id = aal.project_id
                  WHERE aal.date IS NOT NULL AND aal.employee_id IS NOT NULL
                    AND EXTRACT(YEAR FROM aal.date::date) = $1
                    AND NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)
-                   AND (p.id IS NULL OR (LOWER(p.name) NOT LIKE '%dyn%' AND LOWER(p.name) NOT LIKE '%interne%'))
                    AND aal.productivity = true
                  GROUP BY aal.employee_id, mois`,
                 [annee]
