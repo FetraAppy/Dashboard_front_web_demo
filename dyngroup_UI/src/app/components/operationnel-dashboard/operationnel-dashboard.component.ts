@@ -43,6 +43,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // incohérente avec theoHours en vue "all" : ferieHours était multiplié par l'effectif
   // brut alors que theoHours est déjà prorata par employé, ex. 736h aberrant en janvier)
   caBudget: number[] = [];
+  // CA objectif CHF (onglet "Objectif" de la fiche employé) — distinct de caBudget (ancien
+  // système de budget), utilisé pour le KPI "Objectif" (ex-"Budget") et l'objectif de
+  // productivité (CA réalisé / CA objectif).
+  caObjectifChf: number[] = [];
   // ETP par mois — Σ H.théoriques employés (net fériés, prorata embauche/départ) ÷
   // H.théorique d'1 employé plein temps référence. Remplace l'ancienne somme de ratios
   // de contrat, non prorata par présence réelle sur l'année (cas BARBEN Thibaut).
@@ -342,6 +346,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
     if (this.activeCollab === 'all') {
       this.caBudget = Array(12).fill(0);
+      this.caObjectifChf = Array(12).fill(0);
 
       this.tarifHoraire = this.globalData.synthese?.tarif_horaire_moyen || parseFloat(this.globalData.synthese?.tarif_horaire_chf) || 180;
 
@@ -363,6 +368,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           vacInit += c.vac_init || 0;
 
           if (c.ca_bud) c.ca_bud.forEach((v: number, i: number) => this.caBudget[i] += v);
+          if (c.ca_objectif_chf) c.ca_objectif_chf.forEach((v: number, i: number) => this.caObjectifChf[i] += v);
           caBudgetAnnuelCalcule += c.ca_budget_annuel || 0;
         });
         // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales —
@@ -376,6 +382,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         this.theoHoursFullYear = theoFullYearAll;
       } else {
         this.caBudget = this.globalData.ca_bud || [];
+        this.caObjectifChf = Array(12).fill(0);
         caBudgetAnnuelCalcule = parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
         this.etpMonthly = Array(12).fill(0);
         this.theoHoursFullYear = Array(12).fill(0);
@@ -395,6 +402,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       // this.ferieHours = [...this._feriePP]; // désactivé — jours fériés retirés du calcul
 
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
+      this.caObjectifChf = c.ca_objectif_chf ? [...c.ca_objectif_chf] : Array(12).fill(0);
       caBudgetAnnuelCalcule = c.ca_budget_annuel || parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
       if (c.tarif_moyen) this.tarifHoraire = c.tarif_moyen;
       // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales — même
@@ -402,6 +410,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.etpMonthly = real.map((v, i) => this.theoHours[i] > 0 ? Math.round((v / this.theoHours[i]) * 100) / 100 : 0);
     } else {
       this.caBudget = this.globalData.ca_bud || [];
+      this.caObjectifChf = Array(12).fill(0);
       caBudgetAnnuelCalcule = parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
       this.etpMonthly = Array(12).fill(0);
     }
@@ -475,7 +484,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       : [parseInt(this.activeMonth)];
 
     // Aggregates for KPIs
-    this.kpiObjFact = monthIndices.reduce((s, i) => s + this.caBudget[i], 0);
+    // kpiObjFact = "CA objectif" (carte "OBJECTIF", ex-"BUDGET") — vient de l'onglet "Objectif"
+    // de la fiche employé (x_studio_objectif_chf), pas de l'ancien système de budget (caBudget).
+    this.kpiObjFact = monthIndices.reduce((s, i) => s + this.caObjectifChf[i], 0);
     this.kpiCaReal = monthIndices.reduce((s, i) => s + car[i], 0);
     const totalTheo = monthIndices.reduce((s, i) => s + this.theoHours[i], 0);
     const totalReal = monthIndices.reduce((s, i) => s + real[i], 0);
@@ -487,11 +498,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.totalTheoHours = monthIndices.reduce((s, i) => s + this.theoHours[i], 0);
     this.totalTheoHoursFullYear = monthIndicesFullYear.reduce((s, i) => s + (this.theoHoursFullYear[i] || 0), 0);
     this.totalRealHours = monthIndices.reduce((s, i) => s + real[i], 0);
-    // ETP affiché en pied de tableau = moyenne des ETP mensuels sur la période sélectionnée
-    // (un ETP mensuel, pas une somme — sommer des mois donnerait un nombre sans sens).
-    this.etpValue = monthIndices.length > 0
-      ? monthIndices.reduce((s, i) => s + (this.etpMonthly[i] || 0), 0) / monthIndices.length
-      : 0;
+    // ETP affiché en pied de tableau = somme des ETP mensuels sur la période sélectionnée
+    // (total, pas moyenne — demande utilisateur du 2026-09-11).
+    this.etpValue = monthIndices.reduce((s, i) => s + (this.etpMonthly[i] || 0), 0);
 
     // Total variable hours
     let totVar = 0;
@@ -525,9 +534,12 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // le tableau "Suivi mensuel détaillé" (H. Productivité / Taux Productivité, total).
     this.totalProductifHours = monthIndices.reduce((s, i) => s + productif[i], 0);
 
-    // Objectif de productivité dynamique : Σ H. facturables / (Σ H. théoriques − Σ absences) × 100
-    const baseNette = totalTheo - this.totalAbsences;
-    this.kpiObjectifProductivite = baseNette > 0 ? (this.totalFactHours / baseNette) * 100 : 0;
+    // Objectif de productivité = CA réalisé / CA objectif × 100 (demande utilisateur du
+    // 2026-09-11). Remplace l'ancien calcul (heures facturables / théorique net absences),
+    // qui ne faisait pas intervenir le CA du tout malgré son usage pour comparer à un objectif
+    // financier. "Efficacité — Productivité mensuelle" (kpiProductivity) affiche désormais la
+    // même valeur (voir template).
+    this.kpiObjectifProductivite = this.kpiObjFact > 0 ? (this.kpiCaReal / this.kpiObjFact) * 100 : 0;
   }
 
   mathMin(a: number, b: number): number {

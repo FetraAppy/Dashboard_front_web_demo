@@ -477,6 +477,9 @@ export async function getDashboardData(req: Request, res: Response) {
                 canton,
                 ca_bud: Array(12).fill(monthlyBudget),
                 ca_budget_annuel: annualBudget,
+                // CA objectif CHF (onglet "Objectif" de la fiche employé, x_studio_objectif_chf,
+                // par mois) — distinct de ca_bud/ca_budget_annuel (ancien système de budget).
+                ca_objectif_chf: Array(12).fill(0),
                 vac_m: Array(12).fill(0),
                 mal_m: Array(12).fill(0),
                 abs_m: Array(12).fill(0),
@@ -681,6 +684,55 @@ export async function getDashboardData(req: Request, res: Response) {
             productifRes = null; // colonne productivity pas encore extraite — fallback plus bas
         }
 
+        // 12. Tarif horaire moyen par employé/mois, à partir des timesheets réels
+        // (x_studio_tarif_horaire, un champ Studio dédié — pas empTarifMap/empPriceMap, qui
+        // servent de repli si aucune donnée mensuelle n'existe). CA réalisé = heures réalisées
+        // × cette moyenne mensuelle (demande utilisateur du 2026-09-11).
+        // Défensif : colonne pas encore extraite tant que stage1_project n'a pas tourné avec ce
+        // nouveau champ (voir kpi_fields.py).
+        let tarifMoisRes: { rows: { employee_id: number; mois: number; tarif_moyen: string }[] } | null = null;
+        try {
+            tarifMoisRes = await pool.query(
+                `SELECT employee_id, EXTRACT(MONTH FROM date::date)::int AS mois,
+                        AVG(x_studio_tarif_horaire) AS tarif_moyen
+                 FROM staging.account_analytic_line
+                 WHERE date IS NOT NULL AND employee_id IS NOT NULL
+                   AND EXTRACT(YEAR FROM date::date) = $1
+                   AND x_studio_tarif_horaire > 0
+                 GROUP BY employee_id, mois`,
+                [annee]
+            );
+        } catch (_) {
+            tarifMoisRes = null; // colonne pas encore extraite — repli sur tarif_moyen par employé
+        }
+        const tarifMoisMap: Record<string, number> = {};
+        if (tarifMoisRes) {
+            tarifMoisRes.rows.forEach(r => {
+                tarifMoisMap[`${r.employee_id}_${r.mois}`] = parseFloat(r.tarif_moyen) || 0;
+            });
+        }
+
+        // 13. CA objectif CHF par employé/mois — onglet "Objectif" de la fiche employé Odoo
+        // (x_suivi_annuel_employe.x_studio_objectif_chf, daté par x_studio_mois_objectif).
+        // Défensif : ces 2 champs viennent d'être ajoutés à l'extraction (voir kpi_fields.py) —
+        // pas encore présents tant que stage1_hr n'a pas tourné avec.
+        let objectifChfRes: { rows: { employee_id: number; mois: number; objectif_chf: string }[] } | null = null;
+        try {
+            objectifChfRes = await pool.query(
+                `SELECT x_studio_employ AS employee_id,
+                        EXTRACT(MONTH FROM x_studio_mois_objectif::date)::int AS mois,
+                        SUM(x_studio_objectif_chf) AS objectif_chf
+                 FROM staging.x_suivi_annuel_employe
+                 WHERE x_active = true AND x_studio_employ IS NOT NULL
+                   AND x_studio_mois_objectif IS NOT NULL
+                   AND EXTRACT(YEAR FROM x_studio_mois_objectif::date) = $1
+                 GROUP BY x_studio_employ, mois`,
+                [annee]
+            );
+        } catch (_) {
+            objectifChfRes = null; // champs pas encore extraits
+        }
+
         // Build dynamic lists for global budget & theoretical hours
         const monthlyTheo = Array(12).fill(168);
         const monthlyBudget = Array(12).fill(0);
@@ -719,22 +771,42 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // Process billable hours — sert aussi de base au CA réalisé (voir ci-dessous)
+        // Process billable hours (encore utilisé par l'ancien tableau "Suivi productivité
+        // mensuelle", désactivé mais pas supprimé — voir operationnel-dashboard.component.html)
         billableRes.rows.forEach(row => {
             const empName = empNameMap[row.employee_id];
             const mIdx = row.mois - 1;
             if (empName && mIdx >= 0 && mIdx < 12) {
-                const hours = parseFloat(row.hours) || 0;
-                collab[empName].billable[mIdx] = hours;
-                // CA réalisé = heures facturables réelles × tarif réel de l'employé (prix de
-                // vente Odoo, ou tarif fixe hr_employee, ou tarif horaire par défaut en dernier
-                // recours) — remplace l'ancien ca_realise_chf de l'ETL qui appliquait un tarif
-                // fixe (180 CHF) identique à tout le monde, sans lien avec le vrai prix facturé.
-                const tarifEmp = empTarifMap[row.employee_id] || empPriceMap[row.employee_id]
-                    || parseFloat(synthese.tarif_horaire_chf) || 180;
-                collab[empName].ca_real[mIdx] = Math.round(hours * tarifEmp * 100) / 100;
+                collab[empName].billable[mIdx] = parseFloat(row.hours) || 0;
             }
         });
+
+        // CA réalisé = heures réalisées (toutes, hors fériés — pas seulement facturables) ×
+        // tarif horaire moyen du mois, calculé à partir des vraies lignes de temps
+        // (x_studio_tarif_horaire). Repli sur le tarif de référence de l'employé
+        // (tarif_moyen — xx_hourly_price ou moyenne de vente) si aucune ligne de ce mois n'a de
+        // tarif renseigné (mois sans activité, ou colonne pas encore extraite).
+        // Demande utilisateur du 2026-09-11 : remplace l'ancien calcul (heures facturables
+        // uniquement × tarif fixe par employé).
+        employees.forEach(emp => {
+            const c = collab[emp.name];
+            for (let m = 0; m < 12; m++) {
+                const tarifMois = tarifMoisMap[`${emp.id}_${m + 1}`];
+                const tarif = tarifMois || c.tarif_moyen;
+                c.ca_real[m] = Math.round(c.real[m] * tarif * 100) / 100;
+            }
+        });
+
+        // CA objectif CHF (onglet "Objectif" de la fiche employé) — voir requête 13 ci-dessus.
+        if (objectifChfRes) {
+            objectifChfRes.rows.forEach(row => {
+                const empName = empNameMap[row.employee_id];
+                const mIdx = row.mois - 1;
+                if (empName && mIdx >= 0 && mIdx < 12) {
+                    collab[empName].ca_objectif_chf[mIdx] = parseFloat(row.objectif_chf) || 0;
+                }
+            });
+        }
 
         // Process vacations
         vacRes.rows.forEach(row => {

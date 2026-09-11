@@ -82,7 +82,7 @@
     <div class="card-grid-4">
       <div class="kpi-card" style="border-left-color: var(--finance);">
         <div class="kpi-card-header">
-          <span class="kpi-id">BUDGET</span>
+          <span class="kpi-id">OBJECTIF</span>
         </div>
         <div class="kpi-label">Objectif facturation</div>
         <div class="kpi-value-sec">
@@ -123,15 +123,17 @@
         <div class="kpi-label">Productivité mensuelle</div>
         <div class="kpi-value-sec">
           <span class="kpi-value" style="color: var(--rh);">
-            {{ kpiProductivity > 0 ? gen(kpiProductivity) + '%' : '—' }}
+            {{ kpiObjectifProductivite > 0 ? gen(kpiObjectifProductivite) + '%' : '—' }}
           </span>
         </div>
-        <div class="kpi-trend" [class.trend-up]="kpiProductivity >= kpiObjectifProductivite" [class.trend-warn]="kpiProductivity < kpiObjectifProductivite && kpiProductivity >= kpiObjectifProductivite * 0.93" [class.trend-down]="kpiProductivity < kpiObjectifProductivite * 0.93" *ngIf="kpiProductivity > 0 && kpiObjectifProductivite > 0">
+        <!-- Même valeur que la carte "Objectif de productivité" (CIBLE) — demande utilisateur
+             du 2026-09-11 : les deux affichent CA réalisé / CA objectif × 100. -->
+        <div class="kpi-trend" [class.trend-up]="statutObjectifProductivite === 'atteint'" [class.trend-warn]="statutObjectifProductivite === 'proche'" [class.trend-down]="statutObjectifProductivite === 'sous'" *ngIf="kpiObjectifProductivite > 0">
           <span>
-            {{ kpiProductivity >= kpiObjectifProductivite ? '▲ Objectif atteint' : kpiProductivity >= kpiObjectifProductivite * 0.93 ? '≈ Proche objectif' : '▼ Sous objectif' }}
+            {{ statutObjectifProductivite === 'atteint' ? '▲ Objectif atteint' : statutObjectifProductivite === 'proche' ? '≈ Proche objectif' : '▼ Sous objectif' }}
           </span>
         </div>
-        <div class="kpi-trend trend-neu" *ngIf="kpiProductivity === 0">
+        <div class="kpi-trend trend-neu" *ngIf="kpiObjectifProductivite === 0">
           <span>En attente de données</span>
         </div>
       </div>
@@ -147,8 +149,8 @@
           </span>
         </div>
         <div class="kpi-trend trend-neu">
-          <span *ngIf="totalFactHours > 0">H. fact. {{ formatHours(totalFactHours) }} / (H. théoriques {{ formatHours(totalTheoHours) }} − absences {{ formatHours(totalAbsences) }})</span>
-          <span *ngIf="totalFactHours === 0">En attente de données</span>
+          <span *ngIf="kpiObjFact > 0">CA réalisé {{ formatNumber(kpiCaReal) }} / objectif {{ formatNumber(kpiObjFact) }} CHF</span>
+          <span *ngIf="kpiObjFact === 0">En attente de données</span>
         </div>
       </div>
     </div>
@@ -353,7 +355,7 @@
         </div>
         -->
         <div class="card">
-          <div class="chart-title">Objectif de productivité {{ activeYear }}</div>
+          <div class="chart-title">Objectif de productivité</div>
           <div class="chart-subtitle">Productivité réalisée vs cible fixe (utils/kpi_config.py)</div>
           <div style="text-align: center; margin: 20px 0 12px;">
             <div style="font-size: 36px; font-weight: 800;"
