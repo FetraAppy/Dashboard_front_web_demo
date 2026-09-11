@@ -748,16 +748,16 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         const activeMonthIndex = isAllMonths ? -1 : parseInt(this.activeMonth);
         const months = isAllMonths ? Math.max(0, this.maxMonthIndex + 1) : 1;
 
-        // Un mois sans budget réel (caBudget = 0, aucune donnée Odoo saisie pour ce périmètre)
-        // ne peut pas produire un "écart" valide — sinon tout le CA réalisé apparaît à tort
-        // comme un dépassement de 100%. On traite ces mois comme sans donnée (null) plutôt
-        // que de comparer à un budget à zéro.
+        // Un mois sans objectif CHF réel (caObjectifChf = 0, aucune donnée Odoo saisie pour ce
+        // périmètre dans l'onglet "Objectif") ne peut pas produire un "écart" valide — sinon tout
+        // le CA réalisé apparaît à tort comme un dépassement de 100%. On traite ces mois comme
+        // sans donnée (null) plutôt que de comparer à un objectif à zéro.
         const ecartsAll = this.filteredCaReal.slice(0, months).map((v, i) =>
-          (v > 0 && this.caBudget[i] > 0) ? v - this.caBudget[i] : null);
+          (v > 0 && this.caObjectifChf[i] > 0) ? v - this.caObjectifChf[i] : null);
         let runningCA = 0;
         const cumCAAll = this.filteredCaReal.slice(0, months).map((v, i) => {
-          if (v === 0 || this.caBudget[i] === 0) return null;
-          runningCA += v - this.caBudget[i];
+          if (v === 0 || this.caObjectifChf[i] === 0) return null;
+          runningCA += v - this.caObjectifChf[i];
           return runningCA;
         });
 

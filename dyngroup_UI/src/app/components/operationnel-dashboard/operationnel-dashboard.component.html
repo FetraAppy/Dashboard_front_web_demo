@@ -183,15 +183,15 @@
     <!-- CA Ecart Chart -->
     <div class="card" style="margin-bottom: 24px;">
       <div class="chart-title">Écart CA Mensuel — Cumul fin de mois</div>
-      <div class="chart-subtitle">Variance par rapport au budget mensuel + cumul de l'écart progressif</div>
+      <div class="chart-subtitle">Variance par rapport à l'objectif CHF mensuel + cumul de l'écart progressif</div>
       <div class="chart-container" style="height: 260px;">
         <canvas #chCaEcartCanvas></canvas>
       </div>
-      <div class="info io" *ngIf="caBudgetAnnuel > 0">
-        <strong>Cumul CA :</strong> somme progressive de l'écart (CA réalisé – CA budget) de janvier jusqu'au mois courant. Barre verte = dépassement, rouge = retard.
+      <div class="info io" *ngIf="kpiObjFact > 0">
+        <strong>Cumul CA :</strong> somme progressive de l'écart (CA réalisé – CA objectif) de janvier jusqu'au mois courant. Barre verte = dépassement, rouge = retard.
       </div>
-      <div class="info io" *ngIf="caBudgetAnnuel === 0">
-        <strong>Budget non défini</strong> pour cette sélection (aucune donnée de budget saisie dans Odoo) — le graphique n'affiche pas d'écart tant qu'il n'y a pas de budget réel à comparer.
+      <div class="info io" *ngIf="kpiObjFact === 0">
+        <strong>Objectif non défini</strong> pour cette sélection (aucune donnée saisie dans l'onglet "Objectif" d'Odoo) — le graphique n'affiche pas d'écart tant qu'il n'y a pas d'objectif CHF réel à comparer.
       </div>
     </div>
 
