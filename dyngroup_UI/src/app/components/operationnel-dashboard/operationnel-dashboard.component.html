@@ -90,9 +90,8 @@
             {{ kpiObjFact > 0 ? formatNumber(kpiObjFact) + ' CHF' : '—' }}
           </span>
         </div>
-        <div class="kpi-trend trend-neu">
-          <span *ngIf="kpiObjFact > 0">{{ activeMonth === 'all' ? 'Année complète' : monthNames[+activeMonth] }}</span>
-          <span *ngIf="kpiObjFact === 0">En attente de données</span>
+        <div class="kpi-trend trend-neu" *ngIf="kpiObjFact > 0">
+          <span>{{ activeMonth === 'all' ? 'Année complète' : monthNames[+activeMonth] }}</span>
         </div>
       </div>
 
@@ -110,9 +109,6 @@
           <span>
             {{ kpiCaEcart >= 0 ? '▲ +' : '▼ ' }}{{ formatNumber(kpiCaEcart) }} CHF vs obj.
           </span>
-        </div>
-        <div class="kpi-trend trend-neu" *ngIf="kpiCaReal === 0">
-          <span>En attente de données</span>
         </div>
       </div>
 
@@ -133,9 +129,6 @@
             {{ statutObjectifProductivite === 'atteint' ? '▲ Objectif atteint' : statutObjectifProductivite === 'proche' ? '≈ Proche objectif' : '▼ Sous objectif' }}
           </span>
         </div>
-        <div class="kpi-trend trend-neu" *ngIf="kpiObjectifProductivite === 0">
-          <span>En attente de données</span>
-        </div>
       </div>
 
       <div class="kpi-card" style="border-left-color: var(--tax);">
@@ -148,9 +141,8 @@
             {{ kpiObjectifProductivite > 0 ? gen(kpiObjectifProductivite) + '%' : '—' }}
           </span>
         </div>
-        <div class="kpi-trend trend-neu">
-          <span *ngIf="kpiObjFact > 0">CA réalisé {{ formatNumber(kpiCaReal) }} / objectif {{ formatNumber(kpiObjFact) }} CHF</span>
-          <span *ngIf="kpiObjFact === 0">En attente de données</span>
+        <div class="kpi-trend trend-neu" *ngIf="kpiObjFact > 0">
+          <span>CA réalisé {{ formatNumber(kpiCaReal) }} / objectif {{ formatNumber(kpiObjFact) }} CHF</span>
         </div>
       </div>
     </div>
@@ -189,9 +181,6 @@
       </div>
       <div class="info io" *ngIf="kpiObjFact > 0">
         <strong>Cumul CA :</strong> somme progressive de l'écart (CA réalisé – CA objectif) de janvier jusqu'au mois courant. Barre verte = dépassement, rouge = retard.
-      </div>
-      <div class="info io" *ngIf="kpiObjFact === 0">
-        <strong>Objectif non défini</strong> pour cette sélection (aucune donnée saisie dans l'onglet "Objectif" d'Odoo) — le graphique n'affiche pas d'écart tant qu'il n'y a pas d'objectif CHF réel à comparer.
       </div>
     </div>
 
