@@ -788,7 +788,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
             labels,
             datasets: [
               {
-                label: 'Écart CA mensuel',
+                label: 'Objectif mensuel (écart)',
                 data: ecartsData as any,
                 backgroundColor: ecartBgColors,
                 borderColor: ecartBorderColors,
@@ -797,7 +797,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
                 order: 2
               },
               {
-                label: 'Cumul CA écart',
+                label: 'Objectif cumulé (écart)',
                 data: cumCAData as any,
                 type: 'line',
                 borderColor: '#f97316',
