@@ -119,14 +119,14 @@
         <div class="kpi-label">Productivité mensuelle</div>
         <div class="kpi-value-sec">
           <span class="kpi-value" style="color: var(--rh);">
-            {{ kpiObjectifProductivite > 0 ? gen(kpiObjectifProductivite) + '%' : '—' }}
+            {{ kpiProductivity > 0 ? gen(kpiProductivity) + '%' : '—' }}
           </span>
         </div>
-        <!-- Même valeur que la carte "Objectif de productivité" (CIBLE) — demande utilisateur
-             du 2026-09-11 : les deux affichent CA réalisé / CA objectif × 100. -->
-        <div class="kpi-trend" [class.trend-up]="statutObjectifProductivite === 'atteint'" [class.trend-warn]="statutObjectifProductivite === 'proche'" [class.trend-down]="statutObjectifProductivite === 'sous'" *ngIf="kpiObjectifProductivite > 0">
+        <!-- Heures productives ÷ heures réalisées × 100 — mesure distincte de "Objectif de
+             productivité" (CIBLE) depuis le retour arrière du 2026-09-14 (voir kpiProductivity). -->
+        <div class="kpi-trend" [class.trend-up]="statutProductivite === 'atteint'" [class.trend-warn]="statutProductivite === 'proche'" [class.trend-down]="statutProductivite === 'sous'" *ngIf="kpiProductivity > 0">
           <span>
-            {{ statutObjectifProductivite === 'atteint' ? '▲ Objectif atteint' : statutObjectifProductivite === 'proche' ? '≈ Proche objectif' : '▼ Sous objectif' }}
+            {{ statutProductivite === 'atteint' ? '▲ Objectif atteint' : statutProductivite === 'proche' ? '≈ Proche objectif' : '▼ Sous objectif' }}
           </span>
         </div>
       </div>

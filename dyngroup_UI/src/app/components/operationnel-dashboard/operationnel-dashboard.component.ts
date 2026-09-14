@@ -291,6 +291,15 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     return 'sous';
   }
 
+  /** Statut de la carte EFFICACITÉ (kpiProductivity = heures productives ÷ heures réalisées),
+   *  mesure distincte de statutObjectifProductivite depuis le retour arrière du 2026-09-14 —
+   *  voir kpiProductivity dans calculateData(). Mêmes seuils que l'ancienne cible historique. */
+  get statutProductivite(): 'atteint' | 'proche' | 'sous' {
+    if (this.kpiProductivity >= this.OBJECTIF_PRODUCTIVITE_PCT) return 'atteint';
+    if (this.kpiProductivity >= this.SEUIL_PROCHE_OBJECTIF_PCT) return 'proche';
+    return 'sous';
+  }
+
   /**
    * Calcule dynamiquement le max de l'axe Y (heures) à partir des données
    * affichées, avec une marge de 10% et un arrondi « propre » (pas <= 100).
@@ -491,11 +500,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // de la fiche employé (x_studio_objectif_chf), pas de l'ancien système de budget (caBudget).
     this.kpiObjFact = monthIndices.reduce((s, i) => s + this.caObjectifChf[i], 0);
     this.kpiCaReal = monthIndices.reduce((s, i) => s + car[i], 0);
-    const totalTheo = monthIndices.reduce((s, i) => s + this.theoHours[i], 0);
-    const totalReal = monthIndices.reduce((s, i) => s + real[i], 0);
 
     this.kpiCaEcart = this.kpiCaReal - this.kpiObjFact;
-    this.kpiProductivity = totalTheo > 0 ? (totalReal / totalTheo * 100) : 0;
 
     // Table footers
     this.totalTheoHours = monthIndices.reduce((s, i) => s + this.theoHours[i], 0);
@@ -537,12 +543,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // le tableau "Suivi mensuel détaillé" (H. Productivité / Taux Productivité, total).
     this.totalProductifHours = monthIndices.reduce((s, i) => s + productif[i], 0);
 
-    // Objectif de productivité = CA réalisé / CA objectif × 100 (demande utilisateur du
-    // 2026-09-11). Remplace l'ancien calcul (heures facturables / théorique net absences),
-    // qui ne faisait pas intervenir le CA du tout malgré son usage pour comparer à un objectif
-    // financier. "Efficacité — Productivité mensuelle" (kpiProductivity) affiche désormais la
-    // même valeur (voir template).
+    // Objectif de productivité = CA réalisé / CA objectif × 100 — carte CIBLE.
     this.kpiObjectifProductivite = this.kpiObjFact > 0 ? (this.kpiCaReal / this.kpiObjFact) * 100 : 0;
+    // Productivité mensuelle = heures productives ÷ heures réalisées × 100 — carte EFFICACITÉ.
+    // Redevient une mesure distincte du taux réel de travail productif (même formule que "Taux
+    // Productivité" du tableau détaillé), après retour arrière du 2026-09-14 : la fusion avec
+    // "Objectif de productivité" (CA réalisé/CA objectif) du 2026-09-11 portait à confusion, les
+    // deux cartes mesurant des choses différentes (efficacité réelle vs atteinte d'un objectif financier).
+    this.kpiProductivity = this.totalRealHours > 0 ? (this.totalProductifHours / this.totalRealHours) * 100 : 0;
   }
 
   mathMin(a: number, b: number): number {
