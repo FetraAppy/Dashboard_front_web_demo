@@ -160,7 +160,9 @@
         </div>
       </div>
 
-      <div class="card">
+      <!-- Répartition annuelle — masqué temporairement sur demande (2026-09-16), code conservé
+           intact ci-dessous, pas supprimé. -->
+      <div class="card" *ngIf="false">
         <div class="chart-title">Répartition annuelle</div>
         <div class="chart-subtitle">Allocation théorique du temps sur {{ formatHours(heuresTheoAnnuelles) }} globales</div>
         <div class="chart-container" style="height: 220px;">
@@ -184,8 +186,9 @@
       </div>
     </div>
 
-    <!-- Paramètres & Synthèse -->
-    <div class="card">
+    <!-- Paramètres & Synthèse — masqué temporairement sur demande (2026-09-16), code conservé
+         intact ci-dessous, pas supprimé. -->
+    <div class="card" *ngIf="false">
       <div class="chart-title">Paramètres &amp; Synthèse annuelle</div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 16px;">
         <div class="st-group">

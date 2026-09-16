@@ -382,8 +382,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         });
         // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales —
         // simplification demandée le 2026-08-27, remplace la formule société/référence
-        // (théoriques du sous-ensemble ÷ référence 1 ETP) précédente.
-        this.etpMonthly = theoAll.map((t, i) => t > 0 ? Math.round((real[i] / t) * 100) / 100 : 0);
+        // (théoriques du sous-ensemble ÷ référence 1 ETP) précédente. Plafonné à 1 (2026-09-16) :
+        // un ETP mensuel ne doit jamais dépasser 100%, même si le collectif réalise plus
+        // d'heures que son théorique (heures supplémentaires) — ce sont des heures en plus,
+        // pas un ETP additionnel.
+        this.etpMonthly = theoAll.map((t, i) => t > 0 ? Math.min(1, Math.round((real[i] / t) * 100) / 100) : 0);
         // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés)
         this.theoHours = theoAll;
         // Théorique année complète (mois futurs inclus) — pour la colonne "H. théoriques" du
@@ -418,8 +421,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       // plusieurs tarifs mensuels différents ont été appliqués dans l'année.
       if (c.tarif_effectif) this.tarifHoraire = c.tarif_effectif;
       // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales — même
-      // formule que la vue "Tous collaborateurs".
-      this.etpMonthly = real.map((v, i) => this.theoHours[i] > 0 ? Math.round((v / this.theoHours[i]) * 100) / 100 : 0);
+      // formule que la vue "Tous collaborateurs". Plafonné à 1 (2026-09-16, voir ci-dessus).
+      this.etpMonthly = real.map((v, i) => this.theoHours[i] > 0 ? Math.min(1, Math.round((v / this.theoHours[i]) * 100) / 100) : 0);
     } else {
       this.caBudget = this.globalData.ca_bud || [];
       this.caObjectifChf = Array(12).fill(0);
@@ -498,7 +501,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // Aggregates for KPIs
     // kpiObjFact = "CA objectif" (carte "OBJECTIF", ex-"BUDGET") — vient de l'onglet "Objectif"
     // de la fiche employé (x_studio_objectif_chf), pas de l'ancien système de budget (caBudget).
-    this.kpiObjFact = monthIndices.reduce((s, i) => s + this.caObjectifChf[i], 0);
+    // Somme sur l'année complète (monthIndicesFullYear), pas capée au mois courant (monthIndices)
+    // comme le CA réalisé : un objectif peut déjà être saisi dans Odoo pour des mois futurs
+    // (ex: Igor a un objectif d'octobre alors qu'on n'y est pas encore) — corrigé le 2026-09-16,
+    // le total "tous les mois" ignorait ces objectifs futurs.
+    this.kpiObjFact = monthIndicesFullYear.reduce((s, i) => s + this.caObjectifChf[i], 0);
     this.kpiCaReal = monthIndices.reduce((s, i) => s + car[i], 0);
 
     this.kpiCaEcart = this.kpiCaReal - this.kpiObjFact;

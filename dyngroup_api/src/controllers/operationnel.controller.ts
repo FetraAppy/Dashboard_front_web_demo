@@ -612,26 +612,41 @@ export async function getDashboardData(req: Request, res: Response) {
                  GROUP BY ld.employee_id, EXTRACT(MONTH FROM ld.day)::int`,
                 [annee]
             ),
-            // 8. Non-facturable categories breakdown from account_analytic_line, par mois
+            // 8. Non-facturable categories breakdown from account_analytic_line, par mois.
+            // Périmètre = heures NON productives (productivity = false/NULL), pas "amount<=0"
+            // comme avant (2026-09-16) : ce dernier filtre attrapait aussi de vraies heures de
+            // travail productif dont le prix de vente n'était pas renseigné, ce qui gonflait
+            // artificiellement "Administratif" (le fallback ELSE) très au-delà de la réalité
+            // (ex: AGACHII Igor).
+            // "formation" détectée via la tâche Odoo (project_task.name), scopée au projet
+            // "CLIENT DYN SA - INTERNE" — pas par mot-clé dans le nom libre du timesheet comme
+            // avant (2026-09-16, demande utilisateur) : les tâches de ce projet sont une
+            // nomenclature stable/curatée par les RH, contrairement au texte libre saisi par
+            // chacun. Basé sur le nom de la TÂCHE (pas un id figé) pour qu'une nouvelle tâche
+            // "Formation ..." ajoutée plus tard sous ce projet soit prise en compte
+            // automatiquement, sans modification de code. Vérifié sur Igor : ~230h en 2026,
+            // cohérent avec l'ancienne détection par mot-clé (~225h).
             pool.query(
                 `SELECT
-                   employee_id,
-                   EXTRACT(MONTH FROM date::date)::int AS mois,
+                   aal.employee_id,
+                   EXTRACT(MONTH FROM aal.date::date)::int AS mois,
                    CASE
-                     WHEN name LIKE 'Congé (1/%' THEN 'vacances'
-                     WHEN name LIKE 'Congé (7/%' OR name LIKE 'Congé (8/%' OR name LIKE 'Congé (14/%' THEN 'maladie'
-                     WHEN name LIKE 'Congé (%' THEN 'admin'
-                     WHEN LOWER(name) LIKE '%ecole%' OR LOWER(name) LIKE '%école%' OR LOWER(name) LIKE '%cours%' OR LOWER(name) LIKE '%epcl%' OR LOWER(name) LIKE '%formation%' OR LOWER(name) LIKE '%diplome%' THEN 'formation'
-                     WHEN LOWER(name) LIKE '%marketing%' OR LOWER(name) LIKE '%vente%' OR LOWER(name) LIKE '%commercial%' THEN 'marketing'
-                     WHEN LOWER(name) LIKE '%it%' OR LOWER(name) LIKE '%rh%' OR LOWER(name) LIKE '%recrutement%' OR LOWER(name) LIKE '%entretien%' THEN 'rh_it'
+                     WHEN aal.name LIKE 'Congé (1/%' THEN 'vacances'
+                     WHEN aal.name LIKE 'Congé (7/%' OR aal.name LIKE 'Congé (8/%' OR aal.name LIKE 'Congé (14/%' THEN 'maladie'
+                     WHEN aal.name LIKE 'Congé (%' THEN 'admin'
+                     WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%formation%' OR LOWER(pt.name) LIKE '%école%' OR LOWER(pt.name) LIKE '%ecole%' OR LOWER(pt.name) LIKE '%diplome%') THEN 'formation'
+                     WHEN LOWER(aal.name) LIKE '%marketing%' OR LOWER(aal.name) LIKE '%vente%' OR LOWER(aal.name) LIKE '%commercial%' THEN 'marketing'
+                     WHEN LOWER(aal.name) LIKE '%it%' OR LOWER(aal.name) LIKE '%rh%' OR LOWER(aal.name) LIKE '%recrutement%' OR LOWER(aal.name) LIKE '%entretien%' THEN 'rh_it'
                      ELSE 'admin'
                    END AS category,
-                   SUM(unit_amount) AS hours
-                 FROM staging.account_analytic_line
-                 WHERE (amount <= 0 OR amount IS NULL)
-                   AND date IS NOT NULL
-                   AND EXTRACT(YEAR FROM date::date) = $1
-                 GROUP BY employee_id, 2, 3`,
+                   SUM(aal.unit_amount) AS hours
+                 FROM staging.account_analytic_line aal
+                 LEFT JOIN staging.project_task pt ON pt.id = aal.task_id
+                 LEFT JOIN staging.project_project pp ON pp.id = pt.project_id
+                 WHERE (aal.productivity = false OR aal.productivity IS NULL)
+                   AND aal.date IS NOT NULL
+                   AND EXTRACT(YEAR FROM aal.date::date) = $1
+                 GROUP BY aal.employee_id, 2, 3`,
                 [annee]
             ),
             // 9. Global hours repartition by month
@@ -781,27 +796,27 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // CA réalisé = heures réalisées (toutes, hors fériés — pas seulement facturables) ×
-        // tarif horaire moyen du mois, calculé à partir des vraies lignes de temps
-        // (x_studio_tarif_horaire). Repli sur le tarif de référence de l'employé
-        // (tarif_moyen — xx_hourly_price ou moyenne de vente) si aucune ligne de ce mois n'a de
-        // tarif renseigné (mois sans activité, ou colonne pas encore extraite).
-        // Demande utilisateur du 2026-09-11 : remplace l'ancien calcul (heures facturables
-        // uniquement × tarif fixe par employé).
+        // CA réalisé = heures PRODUCTIVES (account_analytic_line.productivity = true, pas
+        // toutes les heures réalisées) × tarif horaire moyen du mois, calculé à partir des
+        // vraies lignes de temps (x_studio_tarif_horaire). Repli sur le tarif de référence de
+        // l'employé (tarif_moyen — xx_hourly_price ou moyenne de vente) si aucune ligne de ce
+        // mois n'a de tarif renseigné (mois sans activité, ou colonne pas encore extraite).
+        // Demande utilisateur du 2026-09-16 : remplace le calcul précédent (toutes les heures
+        // réalisées × tarif), qui surestimait le CA en comptant aussi les heures non productives.
         employees.forEach(emp => {
             const c = collab[emp.name];
             for (let m = 0; m < 12; m++) {
                 const tarifMois = tarifMoisMap[`${emp.id}_${m + 1}`];
                 const tarif = tarifMois || c.tarif_moyen;
-                c.ca_real[m] = Math.round(c.real[m] * tarif * 100) / 100;
+                c.ca_real[m] = Math.round(c.productif[m] * tarif * 100) / 100;
             }
             // Tarif horaire "effectif" de l'employé sur l'année = CA réalisé total ÷ heures
-            // réalisées totales — reconstitue le vrai mélange des tarifs mensuels appliqués
+            // productives totales — reconstitue le vrai mélange des tarifs mensuels appliqués
             // ci-dessus (peut varier d'un mois à l'autre), contrairement à tarif_moyen qui n'est
             // qu'un tarif de référence statique (xx_hourly_price). Repli sur tarif_moyen si
-            // l'employé n'a aucune heure réalisée cette année.
+            // l'employé n'a aucune heure productive cette année.
             const totalCaEmp = c.ca_real.reduce((s: number, v: number) => s + v, 0);
-            const totalHeuresEmp = c.real.reduce((s: number, v: number) => s + v, 0);
+            const totalHeuresEmp = c.productif.reduce((s: number, v: number) => s + v, 0);
             c.tarif_effectif = totalHeuresEmp > 0 ? Math.round((totalCaEmp / totalHeuresEmp) * 100) / 100 : c.tarif_moyen;
         });
 
@@ -865,17 +880,19 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // Tarif horaire moyen global = CA réalisé total ÷ heures réalisées totales (moyenne
-        // pondérée par les heures réellement travaillées de chaque employé) — cohérent avec le
-        // CA réalisé effectivement affiché (voir tarif_effectif ci-dessus), plutôt qu'une simple
-        // moyenne non pondérée des tarifs de référence par employé qui ignorait leur volume
-        // d'heures respectif. Repli sur cette ancienne moyenne (xx_hourly_price → prix de vente
-        // moyen → défaut) si personne n'a encore d'heures réalisées sur l'année.
+        // Tarif horaire moyen global = CA réalisé total ÷ heures PRODUCTIVES totales (moyenne
+        // pondérée par les heures qui génèrent effectivement ce CA depuis le 2026-09-16) —
+        // cohérent avec le CA réalisé effectivement affiché (voir tarif_effectif ci-dessus),
+        // plutôt qu'une simple moyenne non pondérée des tarifs de référence par employé qui
+        // ignorait leur volume d'heures respectif. Diviser par les heures réalisées (toutes,
+        // pas seulement productives) donnerait un tarif artificiellement dilué. Repli sur
+        // l'ancienne moyenne (xx_hourly_price → prix de vente moyen → défaut) si personne n'a
+        // encore d'heures productives sur l'année.
         let totalCaRealAnnuel = 0;
         let totalHeuresRealAnnuel = 0;
         Object.values(collab).forEach((c: any) => {
             totalCaRealAnnuel += c.ca_real.reduce((s: number, v: number) => s + v, 0);
-            totalHeuresRealAnnuel += c.real.reduce((s: number, v: number) => s + v, 0);
+            totalHeuresRealAnnuel += c.productif.reduce((s: number, v: number) => s + v, 0);
         });
         const tarifValues = employees
             .map(emp => empPriceMap[emp.id] || empTarifMap[emp.id] || 0)
