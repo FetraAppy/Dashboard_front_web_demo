@@ -719,14 +719,17 @@ export async function getDashboardData(req: Request, res: Response) {
             // travail productif dont le prix de vente n'était pas renseigné, ce qui gonflait
             // artificiellement "Administratif" (le fallback ELSE) très au-delà de la réalité
             // (ex: AGACHII Igor).
-            // "formation" détectée via la tâche Odoo (project_task.name), scopée au projet
-            // "CLIENT DYN SA - INTERNE" — pas par mot-clé dans le nom libre du timesheet comme
-            // avant (2026-09-16, demande utilisateur) : les tâches de ce projet sont une
-            // nomenclature stable/curatée par les RH, contrairement au texte libre saisi par
-            // chacun. Basé sur le nom de la TÂCHE (pas un id figé) pour qu'une nouvelle tâche
-            // "Formation ..." ajoutée plus tard sous ce projet soit prise en compte
-            // automatiquement, sans modification de code. Vérifié sur Igor : ~230h en 2026,
-            // cohérent avec l'ancienne détection par mot-clé (~225h).
+            // "formation"/"marketing"/"rh_it" détectées via la tâche Odoo (project_task.name),
+            // scopées au projet "CLIENT DYN SA - INTERNE" — pas par mot-clé dans le nom libre du
+            // timesheet comme avant (2026-09-16, demande utilisateur) : les tâches de ce projet
+            // sont une nomenclature stable/curatée par les RH, contrairement au texte libre saisi
+            // par chacun. Basé sur le nom de la TÂCHE (pas un id figé) pour qu'une nouvelle tâche
+            // ajoutée plus tard sous ce projet soit prise en compte automatiquement, sans
+            // modification de code. "admin" = tout le reste (heures non productives qui ne sont
+            // ni un congé, ni une tâche marketing/rh-it/formation de ce projet) — inclut donc les
+            // autres tâches internes (Administratif, Facturation, Innovation...) ET du vrai
+            // travail client non encore flagué "Productivité" dans Odoo (cas non résolu ici,
+            // dépend de la saisie Odoo — vérifié sur NETO DA SILVA Inês).
             pool.query(
                 `SELECT
                    aal.employee_id,
@@ -736,8 +739,8 @@ export async function getDashboardData(req: Request, res: Response) {
                      WHEN aal.name LIKE 'Congé (7/%' OR aal.name LIKE 'Congé (8/%' OR aal.name LIKE 'Congé (14/%' THEN 'maladie'
                      WHEN aal.name LIKE 'Congé (%' THEN 'admin'
                      WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%formation%' OR LOWER(pt.name) LIKE '%école%' OR LOWER(pt.name) LIKE '%ecole%' OR LOWER(pt.name) LIKE '%diplome%') THEN 'formation'
-                     WHEN LOWER(aal.name) LIKE '%marketing%' OR LOWER(aal.name) LIKE '%vente%' OR LOWER(aal.name) LIKE '%commercial%' THEN 'marketing'
-                     WHEN LOWER(aal.name) LIKE '%it%' OR LOWER(aal.name) LIKE '%rh%' OR LOWER(aal.name) LIKE '%recrutement%' OR LOWER(aal.name) LIKE '%entretien%' THEN 'rh_it'
+                     WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%marketing%' OR LOWER(pt.name) LIKE '%commercial%') THEN 'marketing'
+                     WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%informatique%' OR LOWER(pt.name) LIKE '%ressources humaines%') THEN 'rh_it'
                      ELSE 'admin'
                    END AS category,
                    SUM(aal.unit_amount) AS hours
