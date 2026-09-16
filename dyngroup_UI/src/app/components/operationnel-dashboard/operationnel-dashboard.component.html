@@ -147,30 +147,31 @@
       </div>
     </div>
 
-    <!-- Heures & Donut Charts Grid -->
-    <div class="card-grid-2-1">
-      <div class="card">
-        <div class="chart-title">Heures théoriques vs Heures réalisées</div>
-        <div class="chart-subtitle">Volume mensuel + solde cumulatif progressif des heures variables</div>
-        <div class="chart-container" style="height: 290px;">
-          <canvas #chHeuresCanvas></canvas>
-        </div>
-        <div class="info ip">
-          <strong>Cumul heure variable :</strong> solde progressif mensuel = Σ(réalisées – théoriques nettes). Positif = heures excédentaires banquées.
-        </div>
+    <!-- Heures Chart — pleine largeur tant que "Répartition annuelle" est masquée (2026-09-16) :
+         l'ancien wrapper .card-grid-2-1 (grille 2fr/1fr) laissait un vide à droite avec un seul
+         enfant visible. Remettre le grid-2-1 en même temps que "Répartition annuelle". -->
+    <div class="card" style="margin-bottom: 24px;">
+      <div class="chart-title">Heures théoriques vs Heures réalisées</div>
+      <div class="chart-subtitle">Volume mensuel + solde cumulatif progressif des heures variables</div>
+      <div class="chart-container" style="height: 290px;">
+        <canvas #chHeuresCanvas></canvas>
       </div>
+      <div class="info ip">
+        <strong>Cumul heure variable :</strong> solde progressif mensuel = Σ(réalisées – théoriques nettes). Positif = heures excédentaires banquées.
+      </div>
+    </div>
 
-      <!-- Répartition annuelle — masqué temporairement sur demande (2026-09-16), code conservé
-           intact ci-dessous, pas supprimé. -->
-      <div class="card" *ngIf="false">
-        <div class="chart-title">Répartition annuelle</div>
-        <div class="chart-subtitle">Allocation théorique du temps sur {{ formatHours(heuresTheoAnnuelles) }} globales</div>
-        <div class="chart-container" style="height: 220px;">
-          <canvas #chDonutCanvas></canvas>
-        </div>
-        <div style="margin-top: 12px; font-size: 11px; text-align: center; color: var(--text-secondary);">
-          {{ formatHours(heuresTheoAnnuelles) }} annuelles · <strong>{{ formatHours(heuresFactPotentielles) }} facturables potentielles</strong>
-        </div>
+    <!-- Répartition annuelle — masqué temporairement sur demande (2026-09-16), code conservé
+         intact ci-dessous, pas supprimé (sorti de card-grid-2-1, qui n'a plus de sens à un
+         seul enfant visible). -->
+    <div class="card" *ngIf="false">
+      <div class="chart-title">Répartition annuelle</div>
+      <div class="chart-subtitle">Allocation théorique du temps sur {{ formatHours(heuresTheoAnnuelles) }} globales</div>
+      <div class="chart-container" style="height: 220px;">
+        <canvas #chDonutCanvas></canvas>
+      </div>
+      <div style="margin-top: 12px; font-size: 11px; text-align: center; color: var(--text-secondary);">
+        {{ formatHours(heuresTheoAnnuelles) }} annuelles · <strong>{{ formatHours(heuresFactPotentielles) }} facturables potentielles</strong>
       </div>
     </div>
 

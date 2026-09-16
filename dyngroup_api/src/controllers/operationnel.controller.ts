@@ -243,6 +243,59 @@ function computeTheoMensuelEmployee(
     return parMois;
 }
 
+interface ContractPeriod { start: Date; end: Date | null; hoursPerDay: number; }
+
+/**
+ * Heures théoriques mensuelles par employé, en tenant compte de TOUS ses contrats
+ * (pas seulement le contrat courant) — demande utilisateur du 2026-09-16.
+ * Si le taux d'activité change en cours de mois (nouveau contrat), le mois est découpé
+ * en sous-intervalles aux dates de changement de contrat ; chaque sous-intervalle est
+ * calculé indépendamment (jours ouvrés − fériés dans CET intervalle) × hours_per_day du
+ * contrat actif sur cet intervalle, puis les sous-intervalles sont additionnés.
+ * Exemple : contrat A (90%, jusqu'au 15 fév) + contrat B (80%, dès le 16 fév) → théorique
+ * de février = (jours ouvrés du 1-15 fév − fériés) × hpd_A + (jours ouvrés du 16-28 fév
+ * − fériés) × hpd_B, plutôt qu'un seul hours_per_day appliqué au mois entier comme avant.
+ */
+function computeTheoMensuelEmployeeContrats(
+    contracts: ContractPeriod[],
+    year: number,
+    holidayDates: Date[],
+    toDate: boolean = true
+): number[] {
+    const now = new Date();
+    const isCurrentYear = now.getFullYear() === year;
+    const parMois = Array<number>(12).fill(0);
+
+    for (let m = 0; m < 12; m++) {
+        if (toDate && year > now.getFullYear()) break; // future year → all zeros
+        if (toDate && isCurrentYear && m > now.getMonth()) continue; // future month → 0
+
+        const daysInMonth = new Date(year, m + 1, 0).getDate();
+        const lastDay = (toDate && isCurrentYear && m === now.getMonth()) ? now.getDate() : daysInMonth;
+        const monthStart = new Date(year, m, 1);
+        const monthEnd = new Date(year, m, lastDay);
+
+        let total = 0;
+        for (const c of contracts) {
+            const cEnd = c.end ?? monthEnd; // contrat encore actif → pas de borne de fin
+            const from = c.start > monthStart ? c.start : monthStart;
+            const to = cEnd < monthEnd ? cEnd : monthEnd;
+            if (from > to) continue; // ce contrat ne chevauche pas ce mois
+
+            let workingDays = 0;
+            for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+                const dow = d.getDay();
+                if (dow !== 0 && dow !== 6) workingDays++;
+            }
+            const feriesDansFenetre = holidayDates.filter(h => h >= from && h <= to).length;
+            total += (workingDays - feriesDansFenetre) * c.hoursPerDay;
+        }
+        parMois[m] = Math.round(total * 100) / 100;
+    }
+
+    return parMois;
+}
+
 export async function getDashboardData(req: Request, res: Response) {
     try {
         const annee = parseInt(req.query.annee as string) || 2026;
@@ -454,6 +507,34 @@ export async function getDashboardData(req: Request, res: Response) {
             // Tables may not exist yet
         }
 
+        // Historique COMPLET des contrats par employé (pas seulement le plus récent, contrairement
+        // à empEtpMap ci-dessus) — sert à calculer l'heure théorique mensuelle en tenant compte
+        // d'un changement de taux d'activité en cours de mois (demande utilisateur du 2026-09-16).
+        // 'open' et 'close' inclus (un contrat clos reste un historique réel) ; 'draft'/'cancel'
+        // exclus (jamais entrés en vigueur).
+        const empContractsMap: Record<number, ContractPeriod[]> = {};
+        try {
+            const contractsRes = await pool.query(
+                `SELECT c.employee_id, c.date_start, c.date_end,
+                        COALESCE(rc.hours_per_day, 8) AS hours_per_day
+                 FROM staging.hr_contract c
+                 LEFT JOIN staging.resource_calendar rc ON c.resource_calendar_id = rc.id
+                 WHERE c.state IN ('open', 'close') AND c.date_start IS NOT NULL
+                 ORDER BY c.employee_id, c.date_start::date ASC`
+            );
+            contractsRes.rows.forEach(r => {
+                const empId = r.employee_id;
+                if (!empContractsMap[empId]) empContractsMap[empId] = [];
+                empContractsMap[empId].push({
+                    start: new Date(r.date_start),
+                    end: r.date_end ? new Date(r.date_end) : null,
+                    hoursPerDay: parseFloat(r.hours_per_day) || 8
+                });
+            });
+        } catch (_) {
+            // staging.hr_contract pas encore extrait — fallback sur computeTheoMensuelEmployee
+        }
+
         // Map employee ID to Name for quick lookup
         const empNameMap: Record<number, string> = {};
         const collab: Record<string, any> = {};
@@ -465,15 +546,35 @@ export async function getDashboardData(req: Request, res: Response) {
             const canton = empCantonMap[emp.id] || 'VD';
             const holidays = holidaysByCanton[canton];
             empNameMap[emp.id] = emp.name;
+            // Contrats connus pour cet employé → calcul par sous-intervalle (voir
+            // computeTheoMensuelEmployeeContrats). Repli sur l'ancien calcul à taux fixe si
+            // aucun contrat n'a pu être extrait pour cet employé.
+            const contracts = empContractsMap[emp.id];
+            const theoOf = (holidayDates: Date[], toDate: boolean) =>
+                contracts && contracts.length > 0
+                    ? computeTheoMensuelEmployeeContrats(contracts, annee, holidayDates, toDate)
+                    : computeTheoMensuelEmployee(emp, annee, holidayDates, toDate);
+            // Référence "100%" pour l'ETP (demande utilisateur du 2026-09-16) : même fenêtre de
+            // présence (dates de contrat) et même canton que l'employé, mais SANS le taux
+            // d'activité — hoursPerDay forcé à 8 sur chaque intervalle. ETP = théorique réel ÷
+            // cette référence 100% (ex: 128h / 160h = 0.8 pour un contrat à 80%), pas
+            // réalisé/théorique (qui reste le "Taux effort", une mesure différente).
+            const theo100Of = (holidayDates: Date[], toDate: boolean) =>
+                contracts && contracts.length > 0
+                    ? computeTheoMensuelEmployeeContrats(
+                        contracts.map(c => ({ ...c, hoursPerDay: 8 })), annee, holidayDates, toDate)
+                    : computeTheoMensuelEmployee({ ...emp, hours_per_day: 8 }, annee, holidayDates, toDate);
             collab[emp.name] = {
                 real: Array(12).fill(0),
                 ca_real: Array(12).fill(0),
                 billable: Array(12).fill(0),
                 productif: Array(12).fill(0),
-                theo: computeTheoMensuelEmployee(emp, annee, holidays.toDate),
+                theo: theoOf(holidays.toDate, true),
                 // Théorique année complète (pas de coupure à aujourd'hui) — sert uniquement à
                 // "H. théoriques annuelles" du panneau Synthèse (voir toDate=false ci-dessus).
-                theoFullYear: computeTheoMensuelEmployee(emp, annee, holidays.fullYear, false),
+                theoFullYear: theoOf(holidays.fullYear, false),
+                // Référence 100% "à ce jour" — dénominateur de l'ETP (voir theo100Of ci-dessus).
+                theo100: theo100Of(holidays.toDate, true),
                 canton,
                 ca_bud: Array(12).fill(monthlyBudget),
                 ca_budget_annuel: annualBudget,

@@ -363,6 +363,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       if (collabNames.length > 0) {
         const theoAll = Array(12).fill(0);
         const theoFullYearAll = Array(12).fill(0);
+        const theo100All = Array(12).fill(0);
         collabNames.forEach(name => {
           const c = this.collabData[name];
           c.real.forEach((v: number, i: number) => real[i] += v);
@@ -372,6 +373,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c.abs_m) c.abs_m.forEach((v: number, i: number) => abs_[i] += v);
           if (c.theo) c.theo.forEach((v: number, i: number) => theoAll[i] += v);
           if (c.theoFullYear) c.theoFullYear.forEach((v: number, i: number) => theoFullYearAll[i] += v);
+          if (c.theo100) c.theo100.forEach((v: number, i: number) => theo100All[i] += v);
           c.vac_m.forEach((v: number, i: number) => vac[i] += v);
           c.mal_m.forEach((v: number, i: number) => mal[i] += v);
           vacInit += c.vac_init || 0;
@@ -380,13 +382,12 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c.ca_objectif_chf) c.ca_objectif_chf.forEach((v: number, i: number) => this.caObjectifChf[i] += v);
           caBudgetAnnuelCalcule += c.ca_budget_annuel || 0;
         });
-        // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales —
-        // simplification demandée le 2026-08-27, remplace la formule société/référence
-        // (théoriques du sous-ensemble ÷ référence 1 ETP) précédente. Plafonné à 1 (2026-09-16) :
-        // un ETP mensuel ne doit jamais dépasser 100%, même si le collectif réalise plus
-        // d'heures que son théorique (heures supplémentaires) — ce sont des heures en plus,
-        // pas un ETP additionnel.
-        this.etpMonthly = theoAll.map((t, i) => t > 0 ? Math.min(1, Math.round((real[i] / t) * 100) / 100) : 0);
+        // ETP mensuel = H.théoriques réelles (contrat) ÷ H.théoriques référence 100% (même
+        // fenêtre de présence et canton, sans le taux d'activité) — demande utilisateur du
+        // 2026-09-16, remplace l'ancien réalisé/théorique (qui restait "Taux effort", une
+        // mesure différente : le fait de travailler plus/moins que son contrat). Plafonné à 1 :
+        // un ETP mensuel ne doit jamais dépasser 100%, même pour un collectif en heures sup.
+        this.etpMonthly = theoAll.map((t, i) => theo100All[i] > 0 ? Math.min(1, Math.round((t / theo100All[i]) * 100) / 100) : 0);
         // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés)
         this.theoHours = theoAll;
         // Théorique année complète (mois futurs inclus) — pour la colonne "H. théoriques" du
@@ -420,9 +421,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       // voir backend) — plus représentatif que tarif_moyen (tarif de référence statique) quand
       // plusieurs tarifs mensuels différents ont été appliqués dans l'année.
       if (c.tarif_effectif) this.tarifHoraire = c.tarif_effectif;
-      // ETP mensuel = taux d'effort / 100 (H.réalisées ÷ H.théoriques), 2 décimales — même
-      // formule que la vue "Tous collaborateurs". Plafonné à 1 (2026-09-16, voir ci-dessus).
-      this.etpMonthly = real.map((v, i) => this.theoHours[i] > 0 ? Math.min(1, Math.round((v / this.theoHours[i]) * 100) / 100) : 0);
+      // ETP mensuel = H.théoriques réelles (contrat) ÷ H.théoriques référence 100% — même
+      // formule que la vue "Tous collaborateurs" (voir ci-dessus). Plafonné à 1.
+      const theo100 = c.theo100 || Array(12).fill(0);
+      this.etpMonthly = this.theoHours.map((t, i) => theo100[i] > 0 ? Math.min(1, Math.round((t / theo100[i]) * 100) / 100) : 0);
     } else {
       this.caBudget = this.globalData.ca_bud || [];
       this.caObjectifChf = Array(12).fill(0);
