@@ -10,19 +10,30 @@
     <div class="filter-item">
       <span class="filter-title">👤 COLLABORATEUR :</span>
       <div class="select-wrapper">
-        <select class="filter-select" [(ngModel)]="activeCollab" (change)="onFilterChange()">
-          <option value="all">Tous les collaborateurs</option>
-          <option *ngFor="let name of filteredCollaboratorsList" [value]="name">{{ name }}</option>
-        </select>
+        <!-- Champ de recherche (pas un <select>, 2026-09-17) : liste déroulante + saisie libre
+             filtrée via <datalist>. Volontairement non-contrôlé par Angular (pas de [ngModel]) —
+             voir le commentaire sur collabSearchInputRef dans le .ts pour l'explication. -->
+        <input
+          #collabSearchInput
+          type="text"
+          class="filter-select"
+          list="collaborateursDatalist"
+          (input)="onCollabSearchInput(collabSearchInput.value)"
+          placeholder="Tous les collaborateurs (rechercher...)"
+          autocomplete="off"
+        />
+        <datalist id="collaborateursDatalist">
+          <option *ngFor="let name of filteredCollaboratorsList" [value]="name"></option>
+        </datalist>
       </div>
     </div>
 
-    <div class="filter-item" *ngIf="departmentsList.length > 0">
-      <span class="filter-title">🏢 DÉPARTEMENT :</span>
+    <div class="filter-item" *ngIf="companiesList.length > 0">
+      <span class="filter-title">🏢 SOCIÉTÉ :</span>
       <div class="select-wrapper">
-        <select class="filter-select" [(ngModel)]="activeDepartment" (change)="onDepartmentChange()">
-          <option value="all">Tous les départements</option>
-          <option *ngFor="let dept of departmentsList" [value]="dept">{{ dept }}</option>
+        <select class="filter-select" [(ngModel)]="activeCompany" (change)="onCompanyChange()">
+          <option value="all">Toutes les sociétés</option>
+          <option *ngFor="let company of companiesList" [value]="company">{{ company }}</option>
         </select>
       </div>
     </div>
@@ -48,7 +59,7 @@
     </div>
 
     <button
-      *ngIf="activeCollab !== 'all' || activeDepartment !== 'all' || activeYear !== '2026' || activeMonth !== 'all'"
+      *ngIf="activeCollab !== 'all' || activeCompany !== 'all' || activeYear !== '2026' || activeMonth !== 'all'"
       class="clear-filter-btn"
       (click)="resetFilters()"
       title="Réinitialiser les filtres"
@@ -56,7 +67,7 @@
     >
       Réinitialiser
     </button>
-    <span *ngIf="activeCollab === 'all' && activeDepartment === 'all' && activeYear === '2026' && activeMonth === 'all'" style="margin-left: auto; font-size: 10px; color: var(--text-muted); font-weight: 600;">
+    <span *ngIf="activeCollab === 'all' && activeCompany === 'all' && activeYear === '2026' && activeMonth === 'all'" style="margin-left: auto; font-size: 10px; color: var(--text-muted); font-weight: 600;">
       Filtres par défaut
     </span>
   </div>

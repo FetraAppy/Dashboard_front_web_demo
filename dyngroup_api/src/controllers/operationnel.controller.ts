@@ -483,6 +483,24 @@ export async function getDashboardData(req: Request, res: Response) {
             // Colonne pas encore extraite (avant le prochain run de stage1_hr) — fallback Vaud
         }
 
+        // Société par employé (filtre "Société", 2026-09-17, remplace le filtre Département).
+        // Requête à part et défensive : staging.res_company n'existe pas tant que stage1_hr n'a
+        // pas tourné avec cette nouvelle table.
+        const empCompanyMap: Record<number, string> = {};
+        try {
+            const companyRes = await pool.query(
+                `SELECT emp.id, rc.name AS company_name
+                 FROM staging.hr_employee emp
+                 JOIN staging.res_company rc ON rc.id = emp.company_id
+                 WHERE emp.company_id IS NOT NULL`
+            );
+            companyRes.rows.forEach(r => {
+                empCompanyMap[r.id] = r.company_name;
+            });
+        } catch (_) {
+            // staging.res_company pas encore extraite
+        }
+
         // Query ETP (taux d'activité individuel, ex. 0.8 pour un 80%) depuis le contrat actif.
         // DISTINCT ON sans second critère de tri était non-déterministe : si un employé a
         // plusieurs lignes hr_contract à l'état 'open', Postgres pouvait piocher n'importe
@@ -597,13 +615,20 @@ export async function getDashboardData(req: Request, res: Response) {
                 // (560.70) n'a aucun rapport avec ce total.
                 tarif_moyen: empPriceMap[emp.id] || empTarifMap[emp.id] || parseFloat(synthese.tarif_horaire_chf) || 180,
                 etp: empEtpMap[emp.id] || 1,
-                department: emp.department_name || null
+                department: emp.department_name || null,
+                company: empCompanyMap[emp.id] || null
             };
         });
 
         // Liste des départements présents, pour peupler le filtre côté frontend
         const departments = Array.from(
             new Set(employees.map(emp => emp.department_name).filter((d): d is string => !!d))
+        ).sort();
+
+        // Liste des sociétés présentes, pour peupler le filtre "Société" (2026-09-17, remplace
+        // le filtre Département).
+        const companies = Array.from(
+            new Set(employees.map(emp => empCompanyMap[emp.id]).filter((c): c is string => !!c))
         ).sort();
 
         // 3-8. Run the 7 independent queries (tracking, billable, vacations, illnesses, absences, non-facturable, repartition) in parallel
@@ -1041,6 +1066,7 @@ export async function getDashboardData(req: Request, res: Response) {
         res.json({
             collab,
             departments,
+            companies,
             global: {
                 theo: monthlyTheo,
                 ca_bud: monthlyBudget,

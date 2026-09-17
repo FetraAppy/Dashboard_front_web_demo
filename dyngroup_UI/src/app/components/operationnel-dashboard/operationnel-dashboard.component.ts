@@ -26,10 +26,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // View state
   activeSubTab = 'indicateurs';
   activeCollab = 'all';
-  activeDepartment = 'all';
+  activeCompany = 'all';
   activeYear = '2026';
   activeMonth = 'all';
-  departmentsList: string[] = [];
+  companiesList: string[] = [];
   // Day filter removed
 
   // Constants
@@ -112,6 +112,13 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   @ViewChild('chDonutCanvas') chDonutCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild('chCaEcartCanvas') chCaEcartCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild('chNonFactCanvas') chNonFactCanvas!: ElementRef<HTMLCanvasElement>;
+  // Champ de recherche collaborateur (2026-09-17) : input non-contrôlé délibérément (pas de
+  // [ngModel]/[value] réactif) — sinon Angular réécrirait la valeur tapée à chaque frappe tant
+  // qu'elle ne correspond pas encore exactement à un nom connu (cas normal pendant la frappe),
+  // effaçant ce que l'utilisateur est en train de taper. On ne synchronise le champ DOM que
+  // manuellement (syncCollabSearchInput), quand activeCollab change par un autre moyen que la
+  // frappe elle-même (reset, changement de société qui invalide la sélection, etc.).
+  @ViewChild('collabSearchInput') collabSearchInputRef?: ElementRef<HTMLInputElement>;
 
   ngOnInit() {
     this.fetchDashboardData();
@@ -146,12 +153,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         this.collabData = data.collab || {};
         this.globalData = data.global || {};
         this.collaboratorsList = Object.keys(this.collabData).sort();
-        // Filtre département simplifié en 2 groupes : "Administration" vs "Autre" (tous les
-        // autres départements combinés) — demandé le 2026-08-27, au lieu de lister chaque
-        // département réel (Assurance, Audit, Fiduciaire, Fiscalité, Fiscalité PM, Support...).
-        const hasAdmin = Object.values(this.collabData).some((c: any) => c.department === 'Administration');
-        const hasAutre = Object.values(this.collabData).some((c: any) => c.department && c.department !== 'Administration');
-        this.departmentsList = [...(hasAdmin ? ['Administration'] : []), ...(hasAutre ? ['Autre'] : [])];
+        // Filtre "Société" (2026-09-17, remplace le filtre Département — le regroupement
+        // Administration/Autre ne correspondait plus à aucun département réel dans Odoo).
+        // Liste des sociétés réellement présentes parmi les collaborateurs (API : data.companies).
+        this.companiesList = Array.isArray(data.companies) ? data.companies : [];
 
         // Update from API computed values
         // Jours fériés retirés du calcul (voir ferieHours plus haut) — on garde uniquement
@@ -200,6 +205,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     }
 
     this.calculateData();
+    this.syncCollabSearchInput();
     this.cdr.detectChanges();
     setTimeout(() => {
       this.renderCharts();
@@ -222,33 +228,63 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.fetchDashboardData();
   }
 
-  /** Regroupe le département réel d'un employé en 2 catégories : "Administration" ou "Autre"
-   *  (tous les autres départements combinés). */
-  deptBucket(name: string): string {
-    return this.collabData[name]?.department === 'Administration' ? 'Administration' : 'Autre';
+  /** Société réelle d'un employé (2026-09-17, remplace deptBucket/Administration-Autre). */
+  companyOf(name: string): string | null {
+    return this.collabData[name]?.company || null;
   }
 
-  /** Département cumulable avec le filtre collaborateur : si le collaborateur sélectionné
-   *  n'appartient pas au nouveau département, on revient à "tous" pour ce département. */
-  onDepartmentChange() {
+  /** Recale la valeur affichée du champ de recherche collaborateur sur activeCollab — à
+   *  appeler après tout changement de activeCollab qui NE VIENT PAS de la frappe elle-même
+   *  (chargement initial, reset, société qui invalide la sélection courante). Voir le
+   *  commentaire sur collabSearchInputRef pour pourquoi ce champ n'est pas [ngModel]/[value]. */
+  syncCollabSearchInput() {
+    const input = this.collabSearchInputRef?.nativeElement;
+    if (input) {
+      input.value = this.activeCollab === 'all' ? '' : this.activeCollab;
+    }
+  }
+
+  /** Appelé à chaque frappe dans le champ de recherche collaborateur (input non-contrôlé). Ne
+   *  change activeCollab que si le texte tapé correspond exactement à un nom connu (choisi dans
+   *  la liste <datalist>) ou est vide (= "tous") — sinon on laisse l'utilisateur continuer de
+   *  taper sans rien casser. */
+  onCollabSearchInput(value: string) {
+    const trimmed = (value || '').trim();
+    if (!trimmed) {
+      if (this.activeCollab !== 'all') {
+        this.activeCollab = 'all';
+        this.onFilterChange();
+      }
+      return;
+    }
+    if (this.filteredCollaboratorsList.includes(trimmed) && trimmed !== this.activeCollab) {
+      this.activeCollab = trimmed;
+      this.onFilterChange();
+    }
+  }
+
+  /** Société cumulable avec le filtre collaborateur : si le collaborateur sélectionné
+   *  n'appartient pas à la nouvelle société, on revient à "tous" pour ce filtre. */
+  onCompanyChange() {
     if (this.activeCollab !== 'all'
-        && this.activeDepartment !== 'all'
-        && this.deptBucket(this.activeCollab) !== this.activeDepartment) {
+        && this.activeCompany !== 'all'
+        && this.companyOf(this.activeCollab) !== this.activeCompany) {
       this.activeCollab = 'all';
+      this.syncCollabSearchInput();
     }
     this.calculateData();
     this.renderCharts();
   }
 
-  /** Liste des collaborateurs restreinte au département sélectionné (filtre cumulable). */
+  /** Liste des collaborateurs restreinte à la société sélectionnée (filtre cumulable). */
   get filteredCollaboratorsList(): string[] {
-    if (this.activeDepartment === 'all') return this.collaboratorsList;
-    return this.collaboratorsList.filter(name => this.deptBucket(name) === this.activeDepartment);
+    if (this.activeCompany === 'all') return this.collaboratorsList;
+    return this.collaboratorsList.filter(name => this.companyOf(name) === this.activeCompany);
   }
 
   resetFilters() {
     this.activeCollab = 'all';
-    this.activeDepartment = 'all';
+    this.activeCompany = 'all';
     this.activeYear = '2026';
     this.activeMonth = 'all';
     this.fetchDashboardData();
@@ -256,10 +292,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
   getFilterInfo(): string {
     const collabText = this.activeCollab === 'all' ? 'Tous collaborateurs' : this.activeCollab;
-    const deptText = this.activeDepartment === 'all' ? null : this.activeDepartment;
+    const companyText = this.activeCompany === 'all' ? null : this.activeCompany;
     const yearText = this.activeYear;
     const monthText = this.activeMonth === 'all' ? 'Toute l\'année' : MF[parseInt(this.activeMonth)];
-    return [collabText, deptText, yearText, monthText].filter(Boolean).join(' · ');
+    return [collabText, companyText, yearText, monthText].filter(Boolean).join(' · ');
   }
 
   mathRound(val: number): number {
@@ -345,12 +381,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // Compute annual CA budget from per-employee data
     let caBudgetAnnuelCalcule = 0;
 
-    // Filtre département (cumulable avec le filtre collaborateur), calculé une seule fois et
-    // réutilisé aussi pour la synthèse annuelle (H. théoriques, H. productives, H. facturables
-    // potentielles, Solde vacances) — avant cette correction, ces 4 valeurs ignoraient le
-    // département et étaient toujours calculées sur l'effectif total de l'entreprise.
+    // Filtre société (cumulable avec le filtre collaborateur, 2026-09-17 remplace le filtre
+    // département), calculé une seule fois et réutilisé aussi pour la synthèse annuelle
+    // (H. théoriques, H. productives, H. facturables potentielles, Solde vacances).
     const collabNamesDept = Object.keys(this.collabData).filter(name =>
-      this.activeDepartment === 'all' || this.deptBucket(name) === this.activeDepartment
+      this.activeCompany === 'all' || this.companyOf(name) === this.activeCompany
     );
 
     if (this.activeCollab === 'all') {
@@ -883,11 +918,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           ? Array.from({ length: maxIdx + 1 }, (_, i) => i)
           : [parseInt(this.activeMonth)];
 
-        // Collaborateurs retenus : filtre département (cumulable) + filtre collaborateur,
+        // Collaborateurs retenus : filtre société (cumulable) + filtre collaborateur,
         // même logique que calculateData().
         const collabNames = this.activeCollab === 'all'
           ? Object.keys(this.collabData).filter(name =>
-              this.activeDepartment === 'all' || this.deptBucket(name) === this.activeDepartment)
+              this.activeCompany === 'all' || this.companyOf(name) === this.activeCompany)
           : (this.collabData[this.activeCollab] ? [this.activeCollab] : []);
 
         collabNames.forEach(name => {
