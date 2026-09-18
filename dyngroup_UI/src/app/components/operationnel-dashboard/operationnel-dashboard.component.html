@@ -24,6 +24,9 @@
           (blur)="onCollabSearchBlur()"
           placeholder="Tous les collaborateurs (rechercher...)"
           autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
         />
         <div class="collab-suggestions" *ngIf="collabSuggestionsOpen">
           <div class="collab-suggestion" [class.active]="activeCollab === 'all'"
