@@ -1,4 +1,4 @@
-import { Component, ElementRef, Input, ViewChild, AfterViewInit, OnChanges, SimpleChanges, OnDestroy, OnInit, ChangeDetectorRef } from '@angular/core';
+import { Component, ElementRef, Input, ViewChild, HostListener, AfterViewInit, OnChanges, SimpleChanges, OnDestroy, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Chart, registerables } from 'chart.js';
@@ -26,7 +26,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // View state
   activeSubTab = 'indicateurs';
   activeCollab = 'all';
-  activeCompany = 'all';
+  // Sociétés sélectionnées (2026-09-18, sélection multiple par cases à cocher) — tableau vide =
+  // "toutes les sociétés" (pas de filtre), remplace l'ancien activeCompany à valeur unique.
+  activeCompanies: string[] = [];
+  companyFilterOpen = false;
   activeYear = '2026';
   activeMonth = 'all';
   // Recherche collaborateur (2026-09-18) : texte tapé en direct, distinct de activeCollab
@@ -124,6 +127,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // manuellement (syncCollabSearchInput), quand activeCollab change par un autre moyen que la
   // frappe elle-même (reset, changement de société qui invalide la sélection, etc.).
   @ViewChild('collabSearchInput') collabSearchInputRef?: ElementRef<HTMLInputElement>;
+  // Conteneur du filtre Société (2026-09-18, sélection multiple) — utilisé par onDocumentClick
+  // pour fermer le menu de cases à cocher au clic en dehors.
+  @ViewChild('companyFilterContainer') companyFilterContainerRef?: ElementRef<HTMLElement>;
 
   ngOnInit() {
     this.fetchDashboardData();
@@ -318,12 +324,13 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     setTimeout(() => { this.collabSuggestionsOpen = false; }, 150);
   }
 
-  /** Société cumulable avec le filtre collaborateur : si le collaborateur sélectionné
-   *  n'appartient pas à la nouvelle société, on revient à "tous" pour ce filtre. */
+  /** Sociétés cumulables avec le filtre collaborateur (sélection multiple, 2026-09-18) : si le
+   *  collaborateur sélectionné n'appartient à AUCUNE des sociétés cochées, on revient à "tous"
+   *  pour ce filtre. */
   onCompanyChange() {
     if (this.activeCollab !== 'all'
-        && this.activeCompany !== 'all'
-        && this.companyOf(this.activeCollab) !== this.activeCompany) {
+        && this.activeCompanies.length > 0
+        && !this.activeCompanies.includes(this.companyOf(this.activeCollab) || '')) {
       this.activeCollab = 'all';
       this.syncCollabSearchInput();
     }
@@ -331,15 +338,59 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.renderCharts();
   }
 
-  /** Liste des collaborateurs restreinte à la société sélectionnée (filtre cumulable). */
+  /** Coche/décoche une société dans le filtre multi-sélection. */
+  toggleCompany(company: string) {
+    const idx = this.activeCompanies.indexOf(company);
+    if (idx >= 0) {
+      this.activeCompanies.splice(idx, 1);
+    } else {
+      this.activeCompanies.push(company);
+    }
+    this.onCompanyChange();
+  }
+
+  isCompanySelected(company: string): boolean {
+    return this.activeCompanies.includes(company);
+  }
+
+  /** Vide la sélection de sociétés ("toutes les sociétés"). */
+  clearCompanies() {
+    if (this.activeCompanies.length === 0) return;
+    this.activeCompanies = [];
+    this.onCompanyChange();
+  }
+
+  /** Libellé affiché sur le bouton du filtre Société (résumé de la sélection). */
+  get companyFilterLabel(): string {
+    if (this.activeCompanies.length === 0) return 'Toutes les sociétés';
+    if (this.activeCompanies.length === 1) return this.activeCompanies[0];
+    return `${this.activeCompanies.length} sociétés`;
+  }
+
+  /** Ferme le filtre Société au clic en dehors de son conteneur (les cases à cocher doivent
+   *  rester ouvertes tant qu'on coche/décoche, contrairement à un simple blur). */
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent) {
+    if (this.companyFilterOpen
+        && this.companyFilterContainerRef
+        && !this.companyFilterContainerRef.nativeElement.contains(event.target as Node)) {
+      this.companyFilterOpen = false;
+    }
+  }
+
+  /** Liste des collaborateurs restreinte aux sociétés sélectionnées (filtre cumulable,
+   *  sélection multiple depuis 2026-09-18). */
   get filteredCollaboratorsList(): string[] {
-    if (this.activeCompany === 'all') return this.collaboratorsList;
-    return this.collaboratorsList.filter(name => this.companyOf(name) === this.activeCompany);
+    if (this.activeCompanies.length === 0) return this.collaboratorsList;
+    return this.collaboratorsList.filter(name => {
+      const c = this.companyOf(name);
+      return c !== null && this.activeCompanies.includes(c);
+    });
   }
 
   resetFilters() {
     this.activeCollab = 'all';
-    this.activeCompany = 'all';
+    this.activeCompanies = [];
     this.activeYear = '2026';
     this.activeMonth = 'all';
     this.fetchDashboardData();
@@ -347,7 +398,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
   getFilterInfo(): string {
     const collabText = this.activeCollab === 'all' ? 'Tous collaborateurs' : this.activeCollab;
-    const companyText = this.activeCompany === 'all' ? null : this.activeCompany;
+    const companyText = this.activeCompanies.length === 0 ? null : this.companyFilterLabel;
     const yearText = this.activeYear;
     const monthText = this.activeMonth === 'all' ? 'Toute l\'année' : MF[parseInt(this.activeMonth)];
     return [collabText, companyText, yearText, monthText].filter(Boolean).join(' · ');
@@ -440,7 +491,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // département), calculé une seule fois et réutilisé aussi pour la synthèse annuelle
     // (H. théoriques, H. productives, H. facturables potentielles, Solde vacances).
     const collabNamesDept = Object.keys(this.collabData).filter(name =>
-      this.activeCompany === 'all' || this.companyOf(name) === this.activeCompany
+      this.activeCompanies.length === 0 || this.activeCompanies.includes(this.companyOf(name) || '')
     );
 
     if (this.activeCollab === 'all') {
@@ -977,7 +1028,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // même logique que calculateData().
         const collabNames = this.activeCollab === 'all'
           ? Object.keys(this.collabData).filter(name =>
-              this.activeCompany === 'all' || this.companyOf(name) === this.activeCompany)
+              this.activeCompanies.length === 0 || this.activeCompanies.includes(this.companyOf(name) || ''))
           : (this.collabData[this.activeCollab] ? [this.activeCollab] : []);
 
         collabNames.forEach(name => {

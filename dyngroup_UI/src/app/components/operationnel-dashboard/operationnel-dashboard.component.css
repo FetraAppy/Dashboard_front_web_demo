@@ -1,5 +1,16 @@
 /* Operational Dashboard View Styles */
 
+/* .filter-bar ET .card ont chacun "backdrop-filter" dans le CSS global — ça crée un contexte
+   d'empilement (stacking context) pour chacun. Comme les .card suivent .filter-bar dans le DOM,
+   ils s'affichent par-dessus lui (et donc par-dessus tout ce qu'il contient, y compris
+   collab-suggestions ci-dessous, malgré son z-index) dès qu'ils se chevauchent visuellement.
+   Passer .filter-bar en position+z-index le sort de ce piège : un z-index positif le fait
+   peindre au-dessus de .card (qui reste en z-index:auto), quel que soit l'ordre dans le DOM. */
+.filter-bar {
+  position: relative;
+  z-index: 5;
+}
+
 /* Liste déroulante personnalisée du champ de recherche collaborateur (2026-09-18) — remplace
    <datalist>, qui re-filtre lui-même les suggestions de façon sensible aux accents. */
 .collab-suggestions {
@@ -36,6 +47,19 @@
   color: var(--text-muted);
   font-weight: 500;
   cursor: default;
+}
+
+/* Filtre Société — sélection multiple par cases à cocher (2026-09-18), réutilise le style de
+   .collab-suggestion(s) mais avec un layout flex pour la case à cocher + le libellé. */
+.company-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.company-checkbox-item input[type="checkbox"] {
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .collab-suggestion-empty:hover {

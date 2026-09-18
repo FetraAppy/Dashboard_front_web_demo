@@ -46,11 +46,24 @@
 
     <div class="filter-item" *ngIf="companiesList.length > 0">
       <span class="filter-title">🏢 SOCIÉTÉ :</span>
-      <div class="select-wrapper">
-        <select class="filter-select" [(ngModel)]="activeCompany" (change)="onCompanyChange()">
-          <option value="all">Toutes les sociétés</option>
-          <option *ngFor="let company of companiesList" [value]="company">{{ company }}</option>
-        </select>
+      <!-- Sélection multiple par cases à cocher (2026-09-18) — remplace le <select> à choix
+           unique. companyFilterContainerRef (voir .ts) permet de fermer ce menu au clic en
+           dehors, sans quoi les cases resteraient ouvertes tant qu'on ne recharge pas la page. -->
+      <div class="select-wrapper" #companyFilterContainer>
+        <button type="button" class="filter-select" style="text-align: left; min-width: 160px;"
+                (click)="companyFilterOpen = !companyFilterOpen">
+          {{ companyFilterLabel }}
+        </button>
+        <div class="collab-suggestions" *ngIf="companyFilterOpen">
+          <label class="collab-suggestion company-checkbox-item" [class.active]="activeCompanies.length === 0">
+            <input type="checkbox" [checked]="activeCompanies.length === 0" (change)="clearCompanies()" />
+            Toutes les sociétés
+          </label>
+          <label class="collab-suggestion company-checkbox-item" *ngFor="let company of companiesList" [class.active]="isCompanySelected(company)">
+            <input type="checkbox" [checked]="isCompanySelected(company)" (change)="toggleCompany(company)" />
+            {{ company }}
+          </label>
+        </div>
       </div>
     </div>
 
@@ -75,7 +88,7 @@
     </div>
 
     <button
-      *ngIf="activeCollab !== 'all' || activeCompany !== 'all' || activeYear !== '2026' || activeMonth !== 'all'"
+      *ngIf="activeCollab !== 'all' || activeCompanies.length > 0 || activeYear !== '2026' || activeMonth !== 'all'"
       class="clear-filter-btn"
       (click)="resetFilters()"
       title="Réinitialiser les filtres"
@@ -83,7 +96,7 @@
     >
       Réinitialiser
     </button>
-    <span *ngIf="activeCollab === 'all' && activeCompany === 'all' && activeYear === '2026' && activeMonth === 'all'" style="margin-left: auto; font-size: 10px; color: var(--text-muted); font-weight: 600;">
+    <span *ngIf="activeCollab === 'all' && activeCompanies.length === 0 && activeYear === '2026' && activeMonth === 'all'" style="margin-left: auto; font-size: 10px; color: var(--text-muted); font-weight: 600;">
       Filtres par défaut
     </span>
   </div>
