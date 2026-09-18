@@ -29,6 +29,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   activeCompany = 'all';
   activeYear = '2026';
   activeMonth = 'all';
+  // Recherche collaborateur (2026-09-18) : texte tapé en direct, distinct de activeCollab
+  // (qui ne prend un nom valide qu'une fois sélectionné). collabSuggestionsOpen pilote
+  // l'affichage de la liste déroulante personnalisée (voir collabSuggestions ci-dessous).
+  collabSearchText = '';
+  collabSuggestionsOpen = false;
   companiesList: string[] = [];
   // Day filter removed
 
@@ -238,17 +243,51 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
    *  (chargement initial, reset, société qui invalide la sélection courante). Voir le
    *  commentaire sur collabSearchInputRef pour pourquoi ce champ n'est pas [ngModel]/[value]. */
   syncCollabSearchInput() {
+    const text = this.activeCollab === 'all' ? '' : this.activeCollab;
+    this.collabSearchText = text;
     const input = this.collabSearchInputRef?.nativeElement;
-    if (input) {
-      input.value = this.activeCollab === 'all' ? '' : this.activeCollab;
-    }
+    if (input) input.value = text;
   }
 
-  /** Appelé à chaque frappe dans le champ de recherche collaborateur (input non-contrôlé). Ne
-   *  change activeCollab que si le texte tapé correspond exactement à un nom connu (choisi dans
-   *  la liste <datalist>) ou est vide (= "tous") — sinon on laisse l'utilisateur continuer de
-   *  taper sans rien casser. */
+  /** Au focus (2026-09-18) : sélectionne tout le texte déjà présent (ex: "AGACHII Igor"), pour
+   *  que la première frappe le remplace directement — sans ça, il fallait effacer le nom déjà
+   *  choisi à la main avant de pouvoir en chercher un autre. Affiche aussi la liste complète des
+   *  collaborateurs (pas seulement ceux qui matchent le nom actuellement affiché) : le texte
+   *  visible dans le champ n'est pas touché (il reste sélectionné jusqu'à la prochaine frappe),
+   *  seule la liste déroulante des suggestions se réinitialise à "tout le monde".
+   */
+  onCollabSearchFocus() {
+    this.collabSearchText = '';
+    this.collabSuggestionsOpen = true;
+    this.collabSearchInputRef?.nativeElement.select();
+  }
+
+  /** Normalise pour une comparaison insensible à la casse ET aux accents (ex: "ines" doit
+   *  matcher "Inês") — demande utilisateur du 2026-09-18 : le <datalist> HTML natif ne permet
+   *  pas ça, le navigateur re-filtre lui-même les options de façon sensible aux accents même si
+   *  on lui fournit déjà une liste pré-filtrée, d'où la liste déroulante personnalisée ci-dessous
+   *  (collabSuggestions/collabSuggestionsOpen) à la place d'un <datalist>. */
+  private normalizeSearch(s: string): string {
+    return (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  }
+
+  /** Suggestions affichées sous le champ de recherche collaborateur, filtrées de façon
+   *  insensible aux accents/casse sur le texte tapé (collabSearchText). */
+  get collabSuggestions(): string[] {
+    const q = this.normalizeSearch(this.collabSearchText);
+    const base = this.filteredCollaboratorsList;
+    if (!q) return base;
+    return base.filter(name => this.normalizeSearch(name).includes(q));
+  }
+
+  /** Appelé à chaque frappe dans le champ de recherche collaborateur (input non-contrôlé). Met
+   *  à jour les suggestions affichées ; ne change activeCollab que si le texte correspond
+   *  EXACTEMENT (insensible accents/casse) à un nom connu — sinon on laisse l'utilisateur
+   *  continuer de taper sans rien casser (le choix se fait normalement via selectCollab, en
+   *  cliquant une suggestion). */
   onCollabSearchInput(value: string) {
+    this.collabSearchText = value;
+    this.collabSuggestionsOpen = true;
     const trimmed = (value || '').trim();
     if (!trimmed) {
       if (this.activeCollab !== 'all') {
@@ -257,10 +296,26 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       }
       return;
     }
-    if (this.filteredCollaboratorsList.includes(trimmed) && trimmed !== this.activeCollab) {
-      this.activeCollab = trimmed;
+    const normalizedTyped = this.normalizeSearch(trimmed);
+    const match = this.filteredCollaboratorsList.find(name => this.normalizeSearch(name) === normalizedTyped);
+    if (match && match !== this.activeCollab) {
+      this.activeCollab = match;
       this.onFilterChange();
     }
+  }
+
+  /** Sélection d'un collaborateur dans la liste déroulante personnalisée (clic). */
+  selectCollab(name: string) {
+    this.activeCollab = name;
+    this.collabSuggestionsOpen = false;
+    this.syncCollabSearchInput();
+    this.onFilterChange();
+  }
+
+  /** Ferme la liste de suggestions un instant après avoir perdu le focus (délai pour laisser le
+   *  temps au (click) sur une suggestion de se déclencher avant que *ngIf ne la retire du DOM). */
+  onCollabSearchBlur() {
+    setTimeout(() => { this.collabSuggestionsOpen = false; }, 150);
   }
 
   /** Société cumulable avec le filtre collaborateur : si le collaborateur sélectionné

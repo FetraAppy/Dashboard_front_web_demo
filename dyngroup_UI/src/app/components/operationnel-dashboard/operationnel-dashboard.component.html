@@ -10,21 +10,34 @@
     <div class="filter-item">
       <span class="filter-title">👤 COLLABORATEUR :</span>
       <div class="select-wrapper">
-        <!-- Champ de recherche (pas un <select>, 2026-09-17) : liste déroulante + saisie libre
-             filtrée via <datalist>. Volontairement non-contrôlé par Angular (pas de [ngModel]) —
-             voir le commentaire sur collabSearchInputRef dans le .ts pour l'explication. -->
+        <!-- Champ de recherche (pas un <select>, 2026-09-17) : liste déroulante personnalisée
+             (pas <datalist>, 2026-09-18 — le navigateur re-filtre lui-même les options de façon
+             sensible aux accents, ex: "ines" ne matchait jamais "Inês"). Volontairement
+             non-contrôlé par Angular (pas de [ngModel]) — voir le commentaire sur
+             collabSearchInputRef dans le .ts. -->
         <input
           #collabSearchInput
           type="text"
           class="filter-select"
-          list="collaborateursDatalist"
           (input)="onCollabSearchInput(collabSearchInput.value)"
+          (focus)="onCollabSearchFocus()"
+          (blur)="onCollabSearchBlur()"
           placeholder="Tous les collaborateurs (rechercher...)"
           autocomplete="off"
         />
-        <datalist id="collaborateursDatalist">
-          <option *ngFor="let name of filteredCollaboratorsList" [value]="name"></option>
-        </datalist>
+        <div class="collab-suggestions" *ngIf="collabSuggestionsOpen">
+          <div class="collab-suggestion" [class.active]="activeCollab === 'all'"
+               (mousedown)="$event.preventDefault()" (click)="selectCollab('all')">
+            Tous les collaborateurs
+          </div>
+          <div class="collab-suggestion" *ngFor="let name of collabSuggestions" [class.active]="name === activeCollab"
+               (mousedown)="$event.preventDefault()" (click)="selectCollab(name)">
+            {{ name }}
+          </div>
+          <div class="collab-suggestion collab-suggestion-empty" *ngIf="collabSuggestions.length === 0">
+            Aucun résultat
+          </div>
+        </div>
       </div>
     </div>
 
