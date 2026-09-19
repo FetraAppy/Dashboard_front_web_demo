@@ -211,8 +211,13 @@ export async function getFinanceDashboard(req: Request, res: Response) {
         // Budgets, modèle account.report.budget / account.report.budget.item) — l'ancienne
         // extraction pointait à tort vers 'account.budget', un modèle qui n'existe pas dans
         // cette instance Odoo, d'où la fausse conclusion "aucun budget saisi". Voir docs/finance.md.
+        // Isolé dans son propre try/catch : staging.account_report_budget(_item) n'existe que
+        // depuis l'ajout de ces modèles à l'extraction Airflow (stage1_accounting) — tant que ce
+        // DAG n'a pas encore tourné avec le changement, la table n'existe pas côté staging. Sans
+        // cet isolement, l'échec de cette requête ferait planter tout le dashboard Finance au
+        // lieu de simplement afficher KR15 sans budget (comportement d'avant).
         const budgetCaByMonth = new Map<string, number>();
-        {
+        try {
             const params: any[] = [];
             let companyClause = "";
             if (companies) { params.push(companies); companyClause = ` AND b.company_id = ANY($${params.length}::int[])`; }
@@ -227,6 +232,8 @@ export async function getFinanceDashboard(req: Request, res: Response) {
                 params
             );
             r.rows.forEach((row) => { budgetCaByMonth.set(row.month, -(parseFloat(row.budget_pos3) || 0)); });
+        } catch (e: any) {
+            console.error("[finance/dashboard] budget CA indisponible (table pas encore extraite ?)", e.message);
         }
 
         // --- KR15 (CA) / KR14 (MB2) / KR13 (frais fixes) — historique complet (hors filtre de
