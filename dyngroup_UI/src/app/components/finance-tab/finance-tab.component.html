@@ -1,14 +1,39 @@
 <div style="padding: 4px 0;">
   <div class="sb" style="background: rgba(59, 130, 246, 0.08); color: var(--finance); border-color: var(--finance)">
     FINANCE & CONTRÔLE DE GESTION
-    <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-      <label style="font-size:11px;color:var(--text-secondary);font-weight:500;">Année :</label>
-      <select [(ngModel)]="activeYear" (change)="onYearChange()"
-              style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text)">
-        <option value="2025">2025</option>
-        <option value="2026">2026</option>
-      </select>
-    </span>
+  </div>
+
+  <!-- Filters Bar -->
+  <div class="filter-bar" style="margin: 0 0 24px 0;">
+    <div class="filter-item" *ngIf="companiesTree.length > 0">
+      <span class="filter-title">🏢 SOCIÉTÉ :</span>
+      <div class="select-wrapper" #companyFilterContainer>
+        <button type="button" class="filter-select" style="text-align: left; min-width: 180px;"
+                (click)="companyFilterOpen = !companyFilterOpen">
+          {{ companyFilterLabel }}
+        </button>
+        <div class="collab-suggestions" *ngIf="companyFilterOpen">
+          <label class="collab-suggestion company-checkbox-item" [class.active]="activeCompanies.length === 0">
+            <input type="checkbox" [checked]="activeCompanies.length === 0" (change)="clearCompanies()" />
+            Toutes les sociétés
+          </label>
+          <label class="collab-suggestion company-checkbox-item" *ngFor="let c of companiesTree"
+                 [class.active]="isCompanySelected(c.id)" [style.paddingLeft.px]="12 + c.level * 16">
+            <input type="checkbox" [checked]="isCompanySelected(c.id)" (change)="toggleCompany(c.id)" />
+            {{ c.name }}
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-item">
+      <span class="filter-title">📅 PÉRIODE :</span>
+      <div class="select-wrapper" style="display:flex;align-items:center;gap:6px;">
+        <input type="date" class="filter-select" [(ngModel)]="dateFrom" (change)="onFiltersChange()" />
+        <span style="color:var(--text-secondary);">→</span>
+        <input type="date" class="filter-select" [(ngModel)]="dateTo" (change)="onFiltersChange()" />
+      </div>
+    </div>
   </div>
 
   @if (error && !loading) {
@@ -106,7 +131,7 @@
             @for (entry of (krMap['KR14'] || []).slice(-3); track entry.period_key) {
               <tr>
                 <td>{{ entry.period_key }}</td>
-                <td>—</td>
+                <td>{{ entry.ca !== null && entry.ca !== undefined ? money(entry.ca / 1000) : '—' }}</td>
                 <td>{{ entry.actual_value !== null ? money(entry.actual_value / 1000) : '—' }}</td>
                 <td>{{ entry.target_value !== null ? money(entry.target_value / 1000) : '—' }}</td>
                 <td>

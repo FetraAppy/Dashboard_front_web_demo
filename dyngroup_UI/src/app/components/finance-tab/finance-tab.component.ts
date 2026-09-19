@@ -1,4 +1,4 @@
-import { Component, OnInit, AfterViewInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, AfterViewInit, OnDestroy, ChangeDetectorRef, ElementRef, ViewChild, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Chart, registerables } from 'chart.js';
@@ -13,8 +13,13 @@ interface OkrEntry {
   target_value: number | null;
   variance_pct: number | null;
   status: string;
-  kr_description?: string;
-  target_label?: string;
+  ca?: number | null;
+}
+
+interface CompanyRow {
+  id: number;
+  name: string;
+  level: number;
 }
 
 @Component({
@@ -22,46 +27,52 @@ interface OkrEntry {
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './finance-tab.component.html',
+  styleUrl: './finance-tab.component.css',
 })
 export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
   private charts: Chart[] = [];
   private viewReady = false;
   private dataReady = false;
 
-  activeYear = '2026';
   loading = true;
   error = false;
 
-  /** Nombre de mois à afficher (cutoff à la date du jour). */
-  private get maxMonths(): number {
-    const y = parseInt(this.activeYear);
-    const now = new Date();
-    if (y > now.getFullYear()) return 0;
-    if (y === now.getFullYear()) return now.getMonth() + 1;
-    return 12;
-  }
+  // Filtre société (multi-sélection, hiérarchique — façon Odoo Accounting > Reporting).
+  // Tableau vide = "toutes les sociétés", même convention que le dashboard Opérationnel.
+  companiesTree: CompanyRow[] = [];
+  activeCompanies: number[] = [];
+  companyFilterOpen = false;
+  @ViewChild('companyFilterContainer') companyFilterContainerRef?: ElementRef<HTMLElement>;
 
-  constructor(private fmt: FormatService, private cdr: ChangeDetectorRef) {}
+  // Filtre période — par défaut année civile en cours. Sans effet sur KR20/KR24
+  // (photos "à l'instant présent", voir docs/finance.md).
+  dateFrom: string;
+  dateTo: string;
+
+  constructor(private fmt: FormatService, private cdr: ChangeDetectorRef) {
+    const now = new Date();
+    this.dateFrom = `${now.getFullYear()}-01-01`;
+    this.dateTo = now.toISOString().slice(0, 10);
+  }
 
   // Données chargées depuis l'API
   krMap: Record<string, OkrEntry[]> = {};
-  latest: Record<string, OkrEntry & { owner?: string }> = {};
+  latest: Record<string, OkrEntry> = {};
 
   // Données calculées pour les charts
   labels12: string[] = [];
   kr15Series: (number | null)[] = [];
   kr14Series: (number | null)[] = [];
   kr11Series: (number | null)[] = [];
-  kr20Series: (number | null)[] = [];
+  kr13Series: (number | null)[] = [];
+  kr15TargetSeries: (number | null)[] = [];
 
-  // KR24 — Ancienneté TEC (dimension bucket : montant par tranche)
+  // KR24 — Ancienneté TEC (tranches d'âge, montant en kCHF)
   kr24Buckets: { label: string; kchf: number }[] = [];
   kr24Avg: number | null = null;
 
-  // KR13 — Dépassement budget frais fixes (% par mois)
-  kr13Series: (number | null)[] = [];
-
   ngOnInit() {
+    this.fetchCompanies();
     this.fetchData();
   }
 
@@ -72,6 +83,18 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy() { this.charts.forEach(c => c.destroy()); }
 
+  async fetchCompanies() {
+    try {
+      const res = await fetch(`${environment.apiUrl}/api/finance/companies`);
+      if (res.ok) {
+        const json = await res.json();
+        this.companiesTree = Array.isArray(json.companies) ? json.companies : [];
+      }
+    } catch (e) {
+      console.error('[finance-tab] companies', e);
+    }
+  }
+
   async fetchData() {
     this.loading = true;
     this.error = false;
@@ -81,7 +104,6 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     const safetyTimeout = setTimeout(() => {
       this.loading = false;
       this.error = true;
-      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     }, 10000);
@@ -89,42 +111,19 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(`${environment.apiUrl}/api/okr/finance?annee=${this.activeYear}`, { signal: controller.signal });
+      const params = new URLSearchParams({ date_from: this.dateFrom, date_to: this.dateTo });
+      if (this.activeCompanies.length) params.set('companies', this.activeCompanies.join(','));
+      const res = await fetch(`${environment.apiUrl}/api/finance/dashboard?${params.toString()}`, { signal: controller.signal });
       clearTimeout(timeoutId);
       clearTimeout(safetyTimeout);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
       this.krMap = json.kr_id_map || {};
       this.latest = json.latest || {};
+      this.kr24Buckets = (json.kr24Buckets || []).map((b: any) => ({ label: b.label, kchf: (b.amount || 0) / 1000 }));
+      this.kr24Avg = this.latest['KR24']?.actual_value ?? null;
       this.cdr.detectChanges();
       this.buildSeries();
-
-      // KR24 — tranches d'ancienneté TEC (dimension bucket)
-      try {
-        const controller2 = new AbortController();
-        const t2 = setTimeout(() => controller2.abort(), 8000);
-        const resDim = await fetch(`${environment.apiUrl}/api/okr/dimensions?annee=${this.activeYear}`, { signal: controller2.signal });
-        clearTimeout(t2);
-        if (resDim.ok) {
-          const dim = await resDim.json();
-          const buckets = dim.dimensions?.['KR24']?.['bucket'] || {};
-          this.kr24Buckets = Object.entries(buckets)
-            .map(([label, entries]: any) => {
-              let last: any = null;
-              (entries || []).forEach((e: any) => { if (!last || e.period_month >= last.period_month) last = e; });
-              return { label, kchf: last && last.actual_value !== null ? last.actual_value / 1000 : 0 };
-            })
-            .sort((a, b) => {
-              const order = ['< 15j', '15-30j', '30-45j', '45-60j', '> 60j'];
-              const ia = order.indexOf(a.label), ib = order.indexOf(b.label);
-              return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-            });
-          this.kr24Avg = this.latest['KR24']?.actual_value ?? null;
-          this.cdr.detectChanges();
-        }
-      } catch (e2) {
-        console.error('[finance-tab] dimensions', e2);
-      }
 
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
@@ -132,7 +131,6 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       clearTimeout(safetyTimeout);
       console.error('[finance-tab]', e);
       this.error = true;
-      // this.buildFallbackSeries(); // désactivé — données mockées trompeuses, voir buildFallbackSeries()
       this.dataReady = true;
       if (this.viewReady) setTimeout(() => this.renderCharts(), 0);
     } finally {
@@ -140,48 +138,84 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  onYearChange() { this.fetchData(); }
+  onFiltersChange() { this.fetchData(); }
 
-  /** Construit des tableaux de 12 valeurs (null pour mois absents) */
-  private buildSeries() {
-    const n = this.maxMonths;
-    this.labels12 = this.generateMonthLabels(parseInt(this.activeYear)).slice(0, n);
-    const fill12 = (krId: string): (number | null)[] => {
-      const arr: (number | null)[] = Array(Math.max(0, n)).fill(null);
-      (this.krMap[krId] || []).forEach(e => {
-        const idx = e.period_month - 1;
-        if (idx >= 0 && idx < n) arr[idx] = e.actual_value;
-      });
-      return arr;
-    };
-    this.kr15Series = fill12('KR15').map(v => v !== null ? v / 1000 : null); // kCHF
-    this.kr14Series = fill12('KR14').map(v => v !== null ? v / 1000 : null);
-    this.kr11Series = fill12('KR11').map(v => v !== null ? v / 1000 : null);
-    this.kr20Series = fill12('KR20');
-    this.kr13Series = fill12('KR13'); // % de dépassement (déjà en %)
+  /** Coche/décoche une société dans le filtre multi-sélection. */
+  toggleCompany(id: number) {
+    const idx = this.activeCompanies.indexOf(id);
+    if (idx >= 0) this.activeCompanies.splice(idx, 1);
+    else this.activeCompanies.push(id);
+    this.onFiltersChange();
   }
 
-  // Désactivé : injectait des données financières mockées en dur en cas d'échec API — trompeur.
-  // `error = true` suffit ; le template doit afficher un état "indisponible" plutôt que ces chiffres inventés.
-  // private buildFallbackSeries() {
-  //   const n = this.maxMonths;
-  //   const M12 = ['Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai'];
-  //   this.labels12 = M12.slice(0, n);
-  //   this.kr15Series = [488, 502, null, 518, 525, 540, 505, 520, 528, 535, 539, 542].slice(0, n);
-  //   this.kr14Series = [155, 158, 152, 162, 165, 170, 158, 165, 172, 175, 180, 187].slice(0, n);
-  //   this.kr11Series = [980, 1050, 920, 1100, 1180, 1250, 1080, 1150, 1200, 1220, 1240, 1240].slice(0, n);
-  //   this.kr20Series = [32, 30, 33, 31, 29, 28, 30, 29, 28, 29, 28, 28].slice(0, n);
-  //   this.kr24Buckets = [
-  //     { label: '< 15j', kchf: 890 }, { label: '15-30j', kchf: 320 },
-  //     { label: '30-45j', kchf: 145 }, { label: '45-60j', kchf: 80 },
-  //     { label: '> 60j', kchf: 42 },
-  //   ];
-  //   this.kr24Avg = 18;
-  // }
+  isCompanySelected(id: number): boolean {
+    return this.activeCompanies.includes(id);
+  }
 
-  private generateMonthLabels(year: number): string[] {
-    const short = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
-    return short.map(m => `${m} ${year}`);
+  /** Vide la sélection de sociétés ("toutes les sociétés"). */
+  clearCompanies() {
+    if (this.activeCompanies.length === 0) return;
+    this.activeCompanies = [];
+    this.onFiltersChange();
+  }
+
+  /** Libellé affiché sur le bouton du filtre Société (résumé de la sélection). */
+  get companyFilterLabel(): string {
+    if (this.activeCompanies.length === 0) return 'Toutes les sociétés';
+    if (this.activeCompanies.length === 1) {
+      return this.companiesTree.find(c => c.id === this.activeCompanies[0])?.name || '1 société';
+    }
+    return `${this.activeCompanies.length} sociétés`;
+  }
+
+  /** Ferme le filtre Société au clic en dehors de son conteneur. */
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent) {
+    if (this.companyFilterOpen
+        && this.companyFilterContainerRef
+        && !this.companyFilterContainerRef.nativeElement.contains(event.target as Node)) {
+      this.companyFilterOpen = false;
+    }
+  }
+
+  /** Liste des mois (YYYY-MM) couverts par la plage de dates sélectionnée. */
+  private monthsInRange(from: string, to: string): string[] {
+    const out: string[] = [];
+    const [fy, fm] = from.split('-').map(Number);
+    const [ty, tm] = to.split('-').map(Number);
+    let y = fy, m = fm;
+    while (y < ty || (y === ty && m <= tm)) {
+      out.push(`${y}-${String(m).padStart(2, '0')}`);
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    return out;
+  }
+
+  /** Construit les séries pour les charts à partir des period_key retournés par l'API
+   *  (et non plus d'un index period_month fixé à une année unique — la plage de dates
+   *  peut désormais couvrir plusieurs années). */
+  private buildSeries() {
+    this.labels12 = this.monthsInRange(this.dateFrom, this.dateTo);
+    const fillFromKey = (krId: string, divisor = 1): (number | null)[] => {
+      const byKey = new Map((this.krMap[krId] || []).map(e => [e.period_key, e.actual_value]));
+      return this.labels12.map(key => {
+        const v = byKey.get(key);
+        return v !== undefined && v !== null ? v / divisor : null;
+      });
+    };
+    this.kr15Series = fillFromKey('KR15', 1000); // kCHF
+    this.kr14Series = fillFromKey('KR14', 1000);
+    this.kr11Series = fillFromKey('KR11', 1000);
+    this.kr13Series = fillFromKey('KR13'); // % de dépassement (déjà en %)
+
+    // Budget CA réel par mois (staging.account_report_budget_item) — remplace la ligne plate
+    // qu'on utilisait faute de budget saisi dans Odoo.
+    const byKey15 = new Map((this.krMap['KR15'] || []).map(e => [e.period_key, e.target_value]));
+    this.kr15TargetSeries = this.labels12.map(key => {
+      const t = byKey15.get(key);
+      return t !== undefined && t !== null ? t / 1000 : null;
+    });
   }
 
   /** Helper : valeur de la dernière entrée disponible ou null */
@@ -244,11 +278,12 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       this.krMap[krId]?.[0]?.target_value ?? null;
     const n = this.labels12.length;
 
-    // KR15 CA mensuel (bar + line N-1 mock)
+    // KR15 CA mensuel (bar)
     const el15 = document.getElementById('fi-kr15') as HTMLCanvasElement | null;
     if (el15) {
-      const target15 = firstTarget('KR15');
-      const targetSeries15 = target15 ? Array(n).fill(target15 / 1000) : Array(n).fill(540);
+      // Budget CA réel par mois (staging.account_report_budget_item), null si aucun budget
+      // saisi pour ce mois précis — pas de valeur arbitraire de repli.
+      const targetSeries15 = this.kr15TargetSeries;
       this.charts.push(new Chart(el15.getContext('2d')!, {
         type: 'bar',
         data: {
@@ -298,31 +333,28 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       }));
     }
 
-    // KR20 DSO + KR21 Perte/CA
+    // KR20 DSO — photo à l'instant présent (pas de série mensuelle, voir docs/finance.md) :
+    // simple comparaison Actuel vs Cible.
     const el2021 = document.getElementById('fi-kr2021') as HTMLCanvasElement | null;
     if (el2021) {
-      const dsoTarget = firstTarget('KR20') ?? 45;
+      const dsoTarget = 45; // cible fixe KR20 (kpi_config.py)
+      const dsoVal = this.getLatestVal('KR20');
       this.charts.push(new Chart(el2021.getContext('2d')!, {
-        type: 'line',
+        type: 'bar',
         data: {
-          labels: this.labels12,
-          datasets: [
-            { label: 'DSO (jours)', data: mkNull(this.kr20Series) as any, borderColor: C.dso, tension: 0.3, borderWidth: 2, fill: false, yAxisID: 'y' },
-            { label: `Cible DSO ≤${dsoTarget}j`, data: Array(n).fill(dsoTarget), borderColor: C.dso, borderDash: [5, 5], borderWidth: 1.5, fill: false, pointRadius: 0, yAxisID: 'y' },
-          ]
+          labels: ['DSO actuel', 'Cible'],
+          datasets: [{ label: 'Jours', data: [dsoVal, dsoTarget], backgroundColor: [C.dso, C.gr] }]
         },
         options: {
+          indexAxis: 'y',
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } },
-          scales: {
-            y: { min: 0, ticks: { callback: (v: any) => v + 'j' } },
-          }
+          plugins: { legend: { display: false } },
+          scales: { x: { min: 0, ticks: { callback: (v: any) => v + 'j' } } }
         }
       }));
     }
 
-    // KR13 Dépassement budget frais fixes (données réelles — kpi.okr_monthly, KR13)
-    // Valeur = % d'écart vs budget de référence ; seuils orange ±5%, rouge ±10%.
+    // KR13 Dépassement budget frais fixes
     const el13 = document.getElementById('fi-kr13') as HTMLCanvasElement | null;
     if (el13) {
       const couleur = (v: number | null) =>
@@ -347,7 +379,7 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       }));
     }
 
-    // KR24 TEC Aging (données réelles — kpi.okr_monthly, dimension bucket)
+    // KR24 TEC Aging (tranches d'ancienneté, photo à l'instant présent)
     const el24 = document.getElementById('fi-kr24') as HTMLCanvasElement | null;
     if (el24) {
       const labels = this.kr24Buckets.length ? this.kr24Buckets.map(b => b.label) : ['Aucune donnée'];

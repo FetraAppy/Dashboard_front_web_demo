@@ -8,6 +8,7 @@ import okrRouter from "./routes/okr.routes";
 import dashboardRouter from "./routes/dashboard.routes";
 import authRouter from "./routes/auth.routes";
 import organigramRouter from "./routes/organigram.routes";
+import financeRouter from "./routes/finance.routes";
 
 dotenv.config();
 
@@ -21,6 +22,7 @@ app.use("/api/operationnel", operationnelRouter);
 app.use("/api/okr", okrRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/organigram", organigramRouter);
+app.use("/api/finance", financeRouter);
 
 tablesConfig.forEach(({ name, primaryKey, schema }) => {
     const pk = primaryKey === undefined ? "id" : primaryKey;

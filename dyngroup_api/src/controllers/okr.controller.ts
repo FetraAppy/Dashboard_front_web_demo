@@ -61,22 +61,6 @@ async function buildOkrResponse(
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/okr/finance?annee=2026
-// KR couverts par le DAG : KR11, KR13, KR14, KR15, KR20, KR21, KR24, KR12
-// ---------------------------------------------------------------------------
-export async function getFinanceOkr(req: Request, res: Response) {
-    try {
-        const annee = parseInt(req.query.annee as string) || 2026;
-        const krIds = ["KR11", "KR13", "KR14", "KR15", "KR20", "KR21", "KR24", "KR12"];
-        const data = await buildOkrResponse(krIds, annee);
-        res.json({ annee, ...data });
-    } catch (err: any) {
-        console.error("[okr/finance]", err);
-        res.status(500).json({ error: "Erreur lors de la récupération des OKR Finance" });
-    }
-}
-
-// ---------------------------------------------------------------------------
 // GET /api/okr/rh?annee=2026
 // KR couverts : KR01, KR06, KR02
 // KR partiels : KR03 (externe)

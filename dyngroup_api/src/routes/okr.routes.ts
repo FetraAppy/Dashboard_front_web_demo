@@ -1,6 +1,5 @@
 import { Router } from "express";
 import {
-    getFinanceOkr,
     getRhOkr,
     getCommercialOkr,
     getOpsOkr,
@@ -9,7 +8,6 @@ import {
 
 const router = Router();
 
-router.get("/finance", getFinanceOkr);
 router.get("/rh", getRhOkr);
 router.get("/commercial", getCommercialOkr);
 router.get("/ops", getOpsOkr);
