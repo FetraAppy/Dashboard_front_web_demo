@@ -24,6 +24,14 @@ export class FormatService {
     return this.format(value, MONETARY_DECIMALS);
   }
 
+  /** Montants monétaires avec un nombre de décimales choisi — pour un affichage ponctuel plus
+   *  précis (ex. dashboard Finance) sans changer MONETARY_DECIMALS globalement pour tout le
+   *  reste de l'app (Opérationnel, etc.). */
+  moneyDecimals(value: number | null | undefined, decimals: number): string {
+    if (value === null || value === undefined || isNaN(value as number)) return '—';
+    return this.format(value, decimals);
+  }
+
   /** Valeurs générales (%, x, j, h, pts, ratios…) */
   num(value: number | null | undefined): string {
     if (value === null || value === undefined || isNaN(value as number)) return '—';

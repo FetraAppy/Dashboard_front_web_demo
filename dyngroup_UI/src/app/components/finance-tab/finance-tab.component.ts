@@ -250,9 +250,9 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     return val.toFixed(decimals) + (unit ? ' ' + unit : '');
   }
 
-  /** Montants monétaires (CHF) — paramétré centralement */
+  /** Montants monétaires (CHF) — 2 décimales, propre à la Finance (voir moneyDecimals()) */
   money(val: number | null | undefined): string {
-    return this.fmt.money(val);
+    return this.fmt.moneyDecimals(val, 2);
   }
 
   /** Valeurs générales (%, x, j, h, pts, ratios…) — paramétré centralement */
