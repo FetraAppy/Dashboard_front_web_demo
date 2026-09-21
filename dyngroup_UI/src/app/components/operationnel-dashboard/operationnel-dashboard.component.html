@@ -287,20 +287,21 @@
                     <div class="pbg"><div class="pf pf-b" [style.width.%]="(theoHoursFullYear[i]/baseMaxFullYear)*100"></div></div>
                   </td>
                   <td style="text-align: right; width: 140px;">
-                    <span *ngIf="filteredRealHours[i] > 0">
+                    <span *ngIf="filteredRealHours[i] > 0 && theoHours[i] > 0">
                       {{ formatHours(filteredRealHours[i]) }}
                       <div class="pbg"><div class="pf pf-g" [style.width.%]="mathMin(100, (filteredRealHours[i]/theoHours[i])*100)"></div></div>
                     </span>
+                    <span *ngIf="filteredRealHours[i] > 0 && theoHours[i] === 0">{{ formatHours(filteredRealHours[i]) }}</span>
                     <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
                   <td style="text-align: right;">
-                    <span *ngIf="filteredRealHours[i] > 0" class="bdg"
+                    <span *ngIf="filteredRealHours[i] > 0 && theoHours[i] > 0" class="bdg"
                           [class.bdg-pos]="(filteredRealHours[i]/theoHours[i]*100) >= 95"
                           [class.bdg-neu]="(filteredRealHours[i]/theoHours[i]*100) >= 85 && (filteredRealHours[i]/theoHours[i]*100) < 95"
                           [class.bdg-neg]="(filteredRealHours[i]/theoHours[i]*100) < 85">
                       {{ gen(filteredRealHours[i]/theoHours[i]*100) }}%
                     </span>
-                    <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
+                    <span *ngIf="filteredRealHours[i] === 0 || theoHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
                   <!-- <td style="text-align: right;">
                     <span *ngIf="ferieHours[i] > 0" class="bdg bdg-k">{{ formatHours(ferieHours[i]) }}</span>
@@ -327,7 +328,7 @@
             </tbody>
             <tfoot>
               <tr style="font-weight: 700; background: var(--th-bg);">
-                <td>Total / Moy.</td>
+                <td>Total ou Moy.</td>
                 <td style="text-align: right;">{{ formatHours(totalTheoHoursFullYear) }}</td>
                 <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
                 <td style="text-align: right;">
@@ -435,11 +436,13 @@
               <tr *ngIf="activeMonth === 'all' || activeMonth === i.toString()">
                 <td><strong>{{ m }}</strong></td>
                 <td style="text-align: right;">
-                  <!-- Avant : (filteredRealHours[i] - (theoHours[i] - ferieHours[i])) — désactivé, jours fériés retirés du calcul -->
+                  <!-- variableHoursMonth[i] : calculé par personne puis sommé (calculateData()),
+                       pas (filteredRealHours[i] - theoHours[i]) sur les totaux déjà agrégés — voir
+                       commentaire sur variableHoursMonth. -->
                   <span *ngIf="filteredRealHours[i] > 0" class="bdg"
-                        [class.bdg-pos]="(filteredRealHours[i] - theoHours[i]) >= 0"
-                        [class.bdg-neg]="(filteredRealHours[i] - theoHours[i]) < 0">
-                    {{ (filteredRealHours[i] - theoHours[i]) >= 0 ? '+' : '' }}{{ formatHours(filteredRealHours[i] - theoHours[i]) }}
+                        [class.bdg-pos]="variableHoursMonth[i] >= 0"
+                        [class.bdg-neg]="variableHoursMonth[i] < 0">
+                    {{ variableHoursMonth[i] >= 0 ? '+' : '' }}{{ formatHours(variableHoursMonth[i]) }}
                   </span>
                   <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
@@ -497,7 +500,7 @@
           </thead>
           <tbody>
             <ng-container *ngFor="let m of monthNames; let i = index">
-              <tr *ngIf="(activeMonth === 'all' || activeMonth === i.toString()) && i <= maxMonthIndex">
+              <tr *ngIf="activeMonth === 'all' || activeMonth === i.toString()">
                 <td><strong>{{ m }}</strong></td>
                 <td style="text-align: right; width: 140px;">
                   {{ formatHours(theoHours[i]) }}
@@ -508,33 +511,34 @@
                   <span *ngIf="ferieHours[i] === 0" class="bdg bdg-gr">—</span>
                 </td> désactivé — jours fériés retirés du calcul -->
                 <td style="text-align: right; width: 140px;">
-                  <span *ngIf="filteredRealHours[i] > 0">
+                  <span *ngIf="filteredRealHours[i] > 0 && theoHours[i] > 0">
                     {{ formatHours(filteredRealHours[i]) }}
                     <div class="pbg"><div class="pf pf-g" [style.width.%]="mathMin(100, (filteredRealHours[i]/theoHours[i])*100)"></div></div>
                   </span>
+                  <span *ngIf="filteredRealHours[i] > 0 && theoHours[i] === 0">{{ formatHours(filteredRealHours[i]) }}</span>
                   <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
-                  <span *ngIf="filteredRealHours[i] > 0" class="bdg"
+                  <span *ngIf="filteredRealHours[i] > 0 && theoHours[i] > 0" class="bdg"
                         [class.bdg-pos]="(filteredRealHours[i]/theoHours[i]*100) >= 95"
                         [class.bdg-neu]="(filteredRealHours[i]/theoHours[i]*100) >= 85 && (filteredRealHours[i]/theoHours[i]*100) < 95"
                         [class.bdg-neg]="(filteredRealHours[i]/theoHours[i]*100) < 85">
                     {{ gen(filteredRealHours[i]/theoHours[i]*100) }}%
                   </span>
-                  <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
+                  <span *ngIf="filteredRealHours[i] === 0 || theoHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
                   <span *ngIf="filteredBillableHours[i] > 0">{{ formatHours(filteredBillableHours[i]) }}</span>
                   <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
                 </td>
                 <td style="text-align: right;">
-                  <span *ngIf="filteredBillableHours[i] > 0" class="bdg"
+                  <span *ngIf="filteredBillableHours[i] > 0 && (theoHours[i] - absencesMonth[i]) > 0" class="bdg"
                         [class.bdg-pos]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) >= kpiObjectifProductivite"
                         [class.bdg-neu]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) >= kpiObjectifProductivite * 0.93 && (filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) < kpiObjectifProductivite"
                         [class.bdg-neg]="(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) < kpiObjectifProductivite * 0.93">
                     {{ gen(filteredBillableHours[i] / (theoHours[i] - absencesMonth[i]) * 100) }}%
                   </span>
-                  <span *ngIf="filteredBillableHours[i] === 0" style="color: var(--text-muted);">—</span>
+                  <span *ngIf="filteredBillableHours[i] === 0 || (theoHours[i] - absencesMonth[i]) <= 0" style="color: var(--text-muted);">—</span>
                 </td>
               </tr>
             </ng-container>

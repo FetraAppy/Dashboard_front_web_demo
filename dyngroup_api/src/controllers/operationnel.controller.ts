@@ -775,6 +775,11 @@ export async function getDashboardData(req: Request, res: Response) {
                  WHERE (aal.productivity = false OR aal.productivity IS NULL)
                    AND aal.date IS NOT NULL
                    AND EXTRACT(YEAR FROM aal.date::date) = $1
+                   -- Même exclusion que "H. réalisées"/"H. Productivité" (requêtes 10/11) : les
+                   -- lignes "Congé (N/M)" à amount=0, auto-générées par Odoo pour les jours fériés
+                   -- d'entreprise, ne sont pas de vraies heures — sans cette exclusion elles
+                   -- gonflaient "admin"/"maladie" au-delà de (H.réalisées - H.Productivité).
+                   AND NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)
                  GROUP BY aal.employee_id, 2, 3`,
                 [annee]
             ),

@@ -91,6 +91,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   vacationsMonth: number[] = [];
   sicknessMonth: number[] = [];
   vacationsBalance: number[] = [];
+  // Heures variable par mois = Σ par collaborateur de (réalisé − théorique) SI son propre
+  // réalisé > 0 ce mois-là (0 sinon) — calculé PAR PERSONNE puis sommé, pas sur les totaux
+  // déjà agrégés (real[i]/theoHours[i]) : sinon, un collaborateur à 0h réalisées un mois donné
+  // (congé complet, pas encore embauché) voit quand même son théorique soustrait du total dès
+  // qu'au moins un autre collaborateur a travaillé ce mois-là — ce qui rendait le total global
+  // très différent de la somme des "Total/Période" individuels (bug confirmé le 2026-09-21 :
+  // -926h en vue globale vs +354h en sommant les fiches, pour janvier 2026 seul).
+  variableHoursMonth: number[] = [];
 
   // KPI aggregates
   kpiObjFact = 0;
@@ -494,6 +502,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.activeCompanies.length === 0 || this.activeCompanies.includes(this.companyOf(name) || '')
     );
 
+    this.variableHoursMonth = Array(12).fill(0);
+
     if (this.activeCollab === 'all') {
       this.caBudget = Array(12).fill(0);
       this.caObjectifChf = Array(12).fill(0);
@@ -522,6 +532,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c.ca_bud) c.ca_bud.forEach((v: number, i: number) => this.caBudget[i] += v);
           if (c.ca_objectif_chf) c.ca_objectif_chf.forEach((v: number, i: number) => this.caObjectifChf[i] += v);
           caBudgetAnnuelCalcule += c.ca_budget_annuel || 0;
+
+          // Heures variable calculées PAR PERSONNE (voir déclaration du champ) : un collaborateur
+          // à 0h réalisées ce mois-là ne contribue rien, plutôt que de voir son théorique
+          // soustrait du total dès qu'un collègue a travaillé ce mois.
+          const cTheoFY = c.theoFullYear || c.theo || [];
+          c.real.forEach((v: number, i: number) => {
+            if (v > 0) this.variableHoursMonth[i] += v - (cTheoFY[i] || 0);
+          });
         });
         // ETP mensuel = H.théoriques réelles (contrat) ÷ H.théoriques référence 100% (même
         // fenêtre de présence et canton, sans le taux d'activité) — demande utilisateur du
@@ -529,10 +547,12 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // mesure différente : le fait de travailler plus/moins que son contrat). Plafonné à 1 :
         // un ETP mensuel ne doit jamais dépasser 100%, même pour un collectif en heures sup.
         this.etpMonthly = theoAll.map((t, i) => theo100All[i] > 0 ? Math.min(1, Math.round((t / theo100All[i]) * 100) / 100) : 0);
-        // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés)
-        this.theoHours = theoAll;
-        // Théorique année complète (mois futurs inclus) — pour la colonne "H. théoriques" du
-        // tableau de suivi mensuel, qui affiche désormais les 12 mois, pas seulement "à ce jour".
+        // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés).
+        // Année complète (pas de coupure à aujourd'hui) : "tous les mois" doit couvrir
+        // janvier-décembre pour les sommes/divisions comme pour l'affichage — demande
+        // utilisateur du 2026-09-21, remplace l'ancien theoAll "à ce jour" qui excluait les
+        // mois futurs de tous les totaux et graphiques.
+        this.theoHours = theoFullYearAll;
         this.theoHoursFullYear = theoFullYearAll;
       } else {
         this.caBudget = this.globalData.ca_bud || [];
@@ -551,8 +571,13 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       vac = [...c.vac_m];
       mal = [...c.mal_m];
       vacInit = c.vac_init || 0;
-      this.theoHours = c.theo ? [...c.theo] : [...this._theoPP];
+      // Année complète (pas de coupure à aujourd'hui), même raisonnement que la branche "all"
+      // ci-dessus — voir commentaire associé.
+      this.theoHours = c.theoFullYear ? [...c.theoFullYear] : (c.theo ? [...c.theo] : [...this._theoPP]);
       this.theoHoursFullYear = c.theoFullYear ? [...c.theoFullYear] : [...this.theoHours];
+      real.forEach((v: number, i: number) => {
+        if (v > 0) this.variableHoursMonth[i] = v - this.theoHours[i];
+      });
       // this.ferieHours = [...this._feriePP]; // désactivé — jours fériés retirés du calcul
 
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
@@ -630,16 +655,17 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       return runningBalance;
     });
 
-    // Determine target month index array (only up to current date)
-    const maxIdx = this.maxMonthIndex;
-    const monthIndices = this.activeMonth === 'all'
-      ? Array.from({ length: Math.max(0, maxIdx + 1) }, (_, i) => i)
-      : [parseInt(this.activeMonth)];
-    // Mêmes mois, mais sur l'année complète (pas limité à aujourd'hui) — pour le tableau de
-    // suivi mensuel, qui affiche désormais les 12 mois avec leur théorique complet.
+    // "Tous les mois" = année complète janvier-décembre, pour les sommes ET les divisions
+    // (ex. /12), pas seulement l'affichage — demande utilisateur du 2026-09-21 : avant cette
+    // correction, monthIndices s'arrêtait au mois courant (maxMonthIndex) et excluait les mois
+    // futurs de tous les totaux (H. théoriques, H. réalisées, ETP, heures variable, absences,
+    // CA budget, heures facturables/productives), alors que monthIndicesFullYear (utilisé
+    // seulement pour kpiObjFact) et les tableaux HTML affichaient déjà les 12 mois — d'où des
+    // totaux incohérents avec la somme visuelle des lignes du tableau.
     const monthIndicesFullYear = this.activeMonth === 'all'
       ? Array.from({ length: 12 }, (_, i) => i)
       : [parseInt(this.activeMonth)];
+    const monthIndices = monthIndicesFullYear;
 
     // Aggregates for KPIs
     // kpiObjFact = "CA objectif" (carte "OBJECTIF", ex-"BUDGET") — vient de l'onglet "Objectif"
@@ -661,20 +687,16 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     // (total, pas moyenne — demande utilisateur du 2026-09-11).
     this.etpValue = monthIndices.reduce((s, i) => s + (this.etpMonthly[i] || 0), 0);
 
-    // Total variable hours
-    let totVar = 0;
-    monthIndices.forEach(i => {
-      const v = real[i];
-      if (v > 0) {
-        // totVar += v - (this.theoHours[i] - (this.ferieHours[i] || 0)); // désactivé — fériés retirés du calcul
-        totVar += v - this.theoHours[i];
-      }
-    });
-    this.totalVarHours = totVar;
+    // Total variable hours — somme de variableHoursMonth (calculé PAR PERSONNE, voir plus haut),
+    // pas de real[i]/theoHours[i] agrégés : garantit que le total égale la somme des
+    // "Total/Période" individuels de chaque collaborateur (bug corrigé le 2026-09-21).
+    this.totalVarHours = monthIndices.reduce((s, i) => s + (this.variableHoursMonth[i] || 0), 0);
     this.totalVacPris = monthIndices.reduce((s, i) => s + vac[i], 0);
 
     if (this.activeMonth === 'all') {
-      this.finalVacBalance = this.vacationsBalance[Math.max(0, maxIdx)];
+      // Solde de fin d'année (décembre), cohérent avec l'année complète désormais utilisée
+      // pour tous les totaux "tous les mois" — plus le solde "à ce jour" seul.
+      this.finalVacBalance = this.vacationsBalance[11];
     } else {
       this.finalVacBalance = this.vacationsBalance[parseInt(this.activeMonth)];
     }
@@ -746,8 +768,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       if (ctx) {
         const isAllMonths = this.activeMonth === 'all';
         const activeMonthIndex = isAllMonths ? -1 : parseInt(this.activeMonth);
-        const maxIdx = Math.max(0, this.maxMonthIndex);
-        const months = isAllMonths ? Math.max(0, this.maxMonthIndex + 1) : 1;
+        // Année complète (12 mois) quand "tous les mois" est sélectionné, pas seulement à ce
+        // jour — voir commentaire dans calculateData() sur monthIndicesFullYear.
+        const months = isAllMonths ? 12 : 1;
 
         const labels = isAllMonths ? MS.slice(0, months) : [MS[activeMonthIndex]];
         const theoData = isAllMonths ? this.theoHours.slice(0, months) : [this.theoHours[activeMonthIndex]];
@@ -756,11 +779,12 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           ? this.filteredRealHours.slice(0, months).map(v => v > 0 ? (this.isDark ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.7)') : (this.isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.03)'))
           : [this.filteredRealHours[activeMonthIndex] > 0 ? (this.isDark ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.7)') : (this.isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.03)')];
 
+        // Cumul basé sur variableHoursMonth (calculé par personne puis sommé), pas sur
+        // filteredRealHours[i]/theoHours[i] agrégés — voir commentaire sur variableHoursMonth.
         let runningVar = 0;
         const cumVarAll = this.filteredRealHours.slice(0, months).map((r, i) => {
           if (r === 0) return null;
-          // runningVar += r - (this.theoHours[i] - (this.ferieHours[i] || 0)); // désactivé — fériés retirés du calcul
-          runningVar += r - this.theoHours[i];
+          runningVar += this.variableHoursMonth[i] || 0;
           return runningVar;
         });
         const cumVarData = isAllMonths ? cumVarAll : [cumVarAll[activeMonthIndex]];
@@ -854,9 +878,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     if (this.chDonutCanvas) {
       const ctx = this.chDonutCanvas.nativeElement.getContext('2d');
       if (ctx) {
-        const maxIdx = Math.max(0, this.maxMonthIndex);
         const monthIndices = this.activeMonth === 'all'
-          ? Array.from({ length: Math.max(0, maxIdx + 1) }, (_, i) => i)
+          ? Array.from({ length: 12 }, (_, i) => i)
           : [parseInt(this.activeMonth)];
         const monthRatio = monthIndices.length / 12;
         const nCollab = this.activeCollab === 'all' ? Object.keys(this.collabData).length || 1 : 1;
@@ -892,7 +915,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
               legend: { position: 'bottom', labels: { color: textColor, font: tickFont, usePointStyle: true, padding: 10 } },
               tooltip: {
                 callbacks: {
-                  label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}h (${(ctx.parsed / theoAnnuel * 100).toFixed(1)}%)`
+                  label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}h${theoAnnuel > 0 ? ` (${(ctx.parsed / theoAnnuel * 100).toFixed(1)}%)` : ''}`
                 }
               }
             }
@@ -907,7 +930,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       if (ctx) {
         const isAllMonths = this.activeMonth === 'all';
         const activeMonthIndex = isAllMonths ? -1 : parseInt(this.activeMonth);
-        const months = isAllMonths ? Math.max(0, this.maxMonthIndex + 1) : 1;
+        const months = isAllMonths ? 12 : 1;
 
         // Un mois sans objectif CHF réel (caObjectifChf = 0, aucune donnée Odoo saisie pour ce
         // périmètre dans l'onglet "Objectif") ne peut pas produire un "écart" valide — sinon tout
@@ -1017,11 +1040,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       if (ctx) {
         let nf = { admin: 0, vacances: 0, rh_it: 0, marketing: 0, formation: 0, maladie: 0 };
 
-        // Mois retenus : un seul mois sélectionné, ou tous les mois écoulés — même logique
-        // que les autres graphiques/tableaux (maxMonthIndex borne à aujourd'hui).
-        const maxIdx = Math.max(0, this.maxMonthIndex);
+        // Mois retenus : un seul mois sélectionné, ou l'année complète janvier-décembre —
+        // même logique que les autres graphiques/tableaux (voir calculateData()).
         const monthIndices = this.activeMonth === 'all'
-          ? Array.from({ length: maxIdx + 1 }, (_, i) => i)
+          ? Array.from({ length: 12 }, (_, i) => i)
           : [parseInt(this.activeMonth)];
 
         // Collaborateurs retenus : filtre société (cumulable) + filtre collaborateur,
@@ -1036,11 +1058,18 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c?.non_fact) {
             Object.keys(nf).forEach(k => {
               const key = k as keyof typeof nf;
+              if (key === 'vacances') return; // voir ci-dessous — source hr_leave, pas account_analytic_line
               const arr: number[] = c.non_fact[key] || [];
               monthIndices.forEach(i => { nf[key] += arr[i] || 0; });
             });
           }
         });
+        // Vacances : mêmes chiffres que "Suivi heure variable & Vacances" (this.vacationsMonth,
+        // issu de hr_leave/holiday_status_id=1, réparti jour ouvré par jour ouvré) — demande
+        // utilisateur du 2026-09-21, remplace l'ancienne source account_analytic_line
+        // (lignes de timesheet libellées "Congé (1/...)"), qui divergeait de la vraie demande
+        // de congé validée dans Odoo (voir docs/finance.md-like explication donnée en chat).
+        nf.vacances = monthIndices.reduce((s, i) => s + (this.vacationsMonth[i] || 0), 0);
 
         const labels = ['Administratif', 'Vacances', 'RH / IT', 'Marketing', 'Formation', 'Maladie'];
         const values = [nf.admin, nf.vacances, nf.rh_it, nf.marketing, nf.formation, nf.maladie];
