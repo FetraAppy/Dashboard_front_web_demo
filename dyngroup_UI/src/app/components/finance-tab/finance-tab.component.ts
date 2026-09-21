@@ -66,6 +66,7 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
   kr11Series: (number | null)[] = [];
   kr13Series: (number | null)[] = [];
   kr15TargetSeries: (number | null)[] = [];
+  kr14TargetSeries: (number | null)[] = [];
 
   // KR24 — Ancienneté TEC (tranches d'âge, montant en kCHF)
   kr24Buckets: { label: string; kchf: number }[] = [];
@@ -216,6 +217,14 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       const t = byKey15.get(key);
       return t !== undefined && t !== null ? t / 1000 : null;
     });
+
+    // Cible MB2 réelle par mois (moyenne glissante 12 mois, calculée par mois côté API) —
+    // remplace la ligne plate basée uniquement sur le premier mois affiché.
+    const byKey14 = new Map((this.krMap['KR14'] || []).map(e => [e.period_key, e.target_value]));
+    this.kr14TargetSeries = this.labels12.map(key => {
+      const t = byKey14.get(key);
+      return t !== undefined && t !== null ? t / 1000 : null;
+    });
   }
 
   /** Helper : valeur de la dernière entrée disponible ou null */
@@ -297,21 +306,27 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
       }));
     }
 
-    // KR14 Marge Brute 2
+    // KR14 Marge Brute 2 — barres (le line chart avec y.min=0 rendait les mois négatifs
+    // invisibles, MB2 étant fréquemment négatif) ; couleur par signe, cible réelle par mois
+    // (moyenne glissante), axe Y auto-ajusté pour toujours montrer les valeurs négatives.
     const el14 = document.getElementById('fi-kr14') as HTMLCanvasElement | null;
     if (el14) {
-      const target14 = firstTarget('KR14');
-      const tSeries14 = target14 ? Array(n).fill(target14 / 1000) : Array(n).fill(175);
+      const couleurMb2 = (v: number | null) => v === null ? C.gr : v >= 0 ? '#22c55e' : C.rd;
       this.charts.push(new Chart(el14.getContext('2d')!, {
-        type: 'line',
+        type: 'bar',
         data: {
           labels: this.labels12,
           datasets: [
-            { label: 'MB2 (kCHF)', data: mkNull(this.kr14Series) as any, borderColor: C.fi, backgroundColor: 'rgba(0, 71, 187, 0.08)', fill: true, tension: 0.3, borderWidth: 2 },
-            { label: 'Budget', data: tSeries14, borderColor: C.gr, borderDash: [5, 5], borderWidth: 1.5, fill: false, pointRadius: 0 },
+            { label: 'MB2 (kCHF)', data: this.kr14Series as any, backgroundColor: this.kr14Series.map(couleurMb2) },
+            { label: 'Cible MB2', data: this.kr14TargetSeries as any, type: 'line',
+              borderColor: C.gr, borderDash: [5, 5], borderWidth: 1.5, fill: false, pointRadius: 3, spanGaps: true } as any,
           ]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } }, scales: { y: { min: 0 } } }
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } },
+          scales: { y: { ticks: { callback: (v: any) => v + 'k' } } }
+        }
       }));
     }
 
