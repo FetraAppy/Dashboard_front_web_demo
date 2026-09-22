@@ -311,9 +311,19 @@ export async function getFinanceDashboard(req: Request, res: Response) {
             let companyClause = "";
             if (companies) { params.push(companies); companyClause = ` AND bsl.company_id = ANY($${params.length}::int[])`; }
             const r = await pool.query(
-                `SELECT TO_CHAR(bsl.date::date, 'YYYY-MM') AS month, SUM(bsl.amount) AS bank_movement_chf
+                `SELECT TO_CHAR(bsl.date::date, 'YYYY-MM') AS month, SUM(bsl.amount / COALESCE(rate.rate, 1)) AS bank_movement_chf
                  FROM staging."account_bank_statement_line" bsl
                  JOIN staging."account_journal" j ON j.id = bsl.journal_id
+                 JOIN staging."account_move" m ON m.id = bsl.move_id
+                 LEFT JOIN LATERAL (
+                    SELECT r.rate
+                    FROM staging."res_currency_rate" r
+                    WHERE r.currency_id = m.currency_id
+                    AND r.company_id = m.company_id
+                    AND r.name::date <= bsl.date::date
+                    ORDER BY r.name::date DESC
+                    LIMIT 1
+                 ) rate ON TRUE
                  WHERE j.type = 'bank' AND bsl.date IS NOT NULL
                    AND bsl.date::date BETWEEN $1 AND $2${companyClause}
                  GROUP BY 1 ORDER BY 1`,
