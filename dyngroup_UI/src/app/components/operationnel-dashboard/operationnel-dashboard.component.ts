@@ -512,9 +512,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
       const collabNames = collabNamesDept;
       if (collabNames.length > 0) {
-        const theoAll = Array(12).fill(0);
         const theoFullYearAll = Array(12).fill(0);
-        const theo100All = Array(12).fill(0);
+        const theo100FullYearAll = Array(12).fill(0);
         collabNames.forEach(name => {
           const c = this.collabData[name];
           c.real.forEach((v: number, i: number) => real[i] += v);
@@ -522,9 +521,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           if (c.billable) c.billable.forEach((v: number, i: number) => billable[i] += v);
           if (c.productif) c.productif.forEach((v: number, i: number) => productif[i] += v);
           if (c.abs_m) c.abs_m.forEach((v: number, i: number) => abs_[i] += v);
-          if (c.theo) c.theo.forEach((v: number, i: number) => theoAll[i] += v);
           if (c.theoFullYear) c.theoFullYear.forEach((v: number, i: number) => theoFullYearAll[i] += v);
-          if (c.theo100) c.theo100.forEach((v: number, i: number) => theo100All[i] += v);
+          const cTheo100FY = c.theo100FullYear || c.theo100 || [];
+          cTheo100FY.forEach((v: number, i: number) => theo100FullYearAll[i] += v);
           c.vac_m.forEach((v: number, i: number) => vac[i] += v);
           c.mal_m.forEach((v: number, i: number) => mal[i] += v);
           vacInit += c.vac_init || 0;
@@ -546,7 +545,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // 2026-09-16, remplace l'ancien réalisé/théorique (qui restait "Taux effort", une
         // mesure différente : le fait de travailler plus/moins que son contrat). Plafonné à 1 :
         // un ETP mensuel ne doit jamais dépasser 100%, même pour un collectif en heures sup.
-        this.etpMonthly = theoAll.map((t, i) => theo100All[i] > 0 ? Math.min(1, Math.round((t / theo100All[i]) * 100) / 100) : 0);
+        // Année complète (theoFullYearAll/theo100FullYearAll), pas "à ce jour" — sinon un mois
+        // futur retombe à 0/0 → ETP 0.00 alors que la colonne H.théoriques affiche déjà un
+        // théorique plein pour ce même mois (incohérence relevée le 2026-09-22 sur Octobre).
+        this.etpMonthly = theoFullYearAll.map((t, i) => theo100FullYearAll[i] > 0 ? Math.min(1, Math.round((t / theo100FullYearAll[i]) * 100) / 100) : 0);
         // Theo global = somme des theo par employé (calendrier + prorata, déjà net fériés).
         // Année complète (pas de coupure à aujourd'hui) : "tous les mois" doit couvrir
         // janvier-décembre pour les sommes/divisions comme pour l'affichage — demande
@@ -588,9 +590,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       // plusieurs tarifs mensuels différents ont été appliqués dans l'année.
       if (c.tarif_effectif) this.tarifHoraire = c.tarif_effectif;
       // ETP mensuel = H.théoriques réelles (contrat) ÷ H.théoriques référence 100% — même
-      // formule que la vue "Tous collaborateurs" (voir ci-dessus). Plafonné à 1.
-      const theo100 = c.theo100 || Array(12).fill(0);
-      this.etpMonthly = this.theoHours.map((t, i) => theo100[i] > 0 ? Math.min(1, Math.round((t / theo100[i]) * 100) / 100) : 0);
+      // formule que la vue "Tous collaborateurs" (voir ci-dessus). Plafonné à 1. Année complète
+      // (theo100FullYear), cohérent avec this.theoHours qui est lui-même déjà en année complète.
+      const theo100FY = c.theo100FullYear || c.theo100 || Array(12).fill(0);
+      this.etpMonthly = this.theoHours.map((t, i) => theo100FY[i] > 0 ? Math.min(1, Math.round((t / theo100FY[i]) * 100) / 100) : 0);
     } else {
       this.caBudget = this.globalData.ca_bud || [];
       this.caObjectifChf = Array(12).fill(0);
@@ -1065,10 +1068,12 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
           }
         });
         // Vacances : mêmes chiffres que "Suivi heure variable & Vacances" (this.vacationsMonth,
-        // issu de hr_leave/holiday_status_id=1, réparti jour ouvré par jour ouvré) — demande
-        // utilisateur du 2026-09-21, remplace l'ancienne source account_analytic_line
-        // (lignes de timesheet libellées "Congé (1/...)"), qui divergeait de la vraie demande
-        // de congé validée dans Odoo (voir docs/finance.md-like explication donnée en chat).
+        // issu de hr_leave/holiday_status_id=1, congé RH validé, réparti jour ouvré par jour
+        // ouvré) — décision utilisateur du 2026-09-22 : priorité à la cohérence avec ce tableau,
+        // quitte à ce que Σ catégories de CE graphique ne corresponde plus exactement à
+        // H.réalisées − H.Productivité (56h en feuille de temps vs 136h en congé validé pour
+        // Igor, ex. concret — les deux ne mesurent pas la même chose, voir explication donnée
+        // en chat).
         nf.vacances = monthIndices.reduce((s, i) => s + (this.vacationsMonth[i] || 0), 0);
 
         const labels = ['Administratif', 'Vacances', 'RH / IT', 'Marketing', 'Formation', 'Maladie'];

@@ -593,6 +593,11 @@ export async function getDashboardData(req: Request, res: Response) {
                 theoFullYear: theoOf(holidays.fullYear, false),
                 // Référence 100% "à ce jour" — dénominateur de l'ETP (voir theo100Of ci-dessus).
                 theo100: theo100Of(holidays.toDate, true),
+                // Référence 100% année complète (pas de coupure à aujourd'hui) — dénominateur de
+                // l'ETP en vue "tous les mois" (2026-09-22) : sans ça, l'ETP d'un mois futur
+                // retombe à 0/0 → 0.00 alors que theoFullYear affiche déjà un théorique plein
+                // pour ce même mois, incohérence relevée sur Octobre (176h théorique mais ETP 0).
+                theo100FullYear: theo100Of(holidays.fullYear, false),
                 canton,
                 ca_bud: Array(12).fill(monthlyBudget),
                 ca_budget_annuel: annualBudget,
