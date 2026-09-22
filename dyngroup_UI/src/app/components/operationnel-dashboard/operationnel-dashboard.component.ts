@@ -324,6 +324,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.collabSuggestionsOpen = false;
     this.syncCollabSearchInput();
     this.onFilterChange();
+    // Retire le focus (et donc le curseur clignotant) du champ une fois la sélection faite —
+    // le (mousedown) preventDefault() sur les suggestions empêche le blur naturel du clic.
+    this.collabSearchInputRef?.nativeElement.blur();
   }
 
   /** Ferme la liste de suggestions un instant après avoir perdu le focus (délai pour laisser le
