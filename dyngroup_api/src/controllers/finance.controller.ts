@@ -340,36 +340,38 @@ export async function getFinanceDashboard(req: Request, res: Response) {
             kr_id_map.KR12 = r.rows.map((row) => buildEntry(row.month, row.avg_days !== null ? parseFloat(row.avg_days) : null, KR_CONFIG.KR12));
         }
 
-        // --- KR20 (DSO) / KR24 (aging) — photo à CURRENT_DATE, société uniquement ---
+        // --- Factures clients postées, non payées, échues — base commune KR20/KR24 ---
         {
             const params: any[] = [];
             let companyClause = "";
-            if (companies) { params.push(companies); companyClause = ` AND aml.company_id = ANY($${params.length}::int[])`; }
+            if (companies) { params.push(companies); companyClause = ` AND am.company_id = ANY($${params.length}::int[])`; }
             const r = await pool.query(
-                `SELECT aml.balance,
-                        GREATEST(CURRENT_DATE - COALESCE(aml.date_maturity, aml.date)::date, 0) AS age_days,
-                        CASE
-                          WHEN aml.reconciled = TRUE THEN 'paid'
-                          WHEN COALESCE(aml.date_maturity, aml.date)::date < CURRENT_DATE THEN 'overdue'
-                          ELSE 'open'
-                        END AS aging_bucket
-                 FROM staging."account_move_line" aml
-                 JOIN staging."account_move" am ON am.id = aml.move_id
-                 WHERE am.move_type IN ('out_invoice', 'out_refund') AND am.state = 'posted'
-                   AND aml.partner_id IS NOT NULL
-                   AND (aml.display_type IS NULL OR aml.display_type NOT IN ('line_section', 'line_note'))${companyClause}`,
+                `SELECT (CURRENT_DATE - COALESCE(am.invoice_date_due, am.invoice_date)::date) AS age_days,
+                        am.amount_residual
+                 FROM staging."account_move" am
+                 WHERE am.move_type = 'out_invoice'
+                   AND am.state = 'posted'
+                   AND am.payment_state IS DISTINCT FROM 'paid'
+                   AND am.amount_residual > 0
+                   AND COALESCE(am.invoice_date_due, am.invoice_date)::date < CURRENT_DATE${companyClause}`,
                 params
             );
-            const overdue = r.rows.filter((row) => row.aging_bucket === "overdue");
+            const overdueInvoices: { ageDays: number; residual: number }[] = r.rows.map((row: any) => ({
+                ageDays: parseInt(row.age_days, 10),
+                residual: parseFloat(row.amount_residual) || 0,
+            }));
             const currentMonth = new Date().toISOString().slice(0, 7);
+
+            // --- KR20 : DSO débiteurs ---
             let dso: number | null = null;
-            if (overdue.length) {
-                const sum = overdue.reduce((a, row) => a + parseFloat(row.age_days), 0);
-                dso = Math.round((sum / overdue.length) * 100) / 100;
+            if (overdueInvoices.length) {
+                const sum = overdueInvoices.reduce((a, inv) => a + inv.ageDays, 0);
+                dso = Math.round((sum / overdueInvoices.length) * 100) / 100;
             }
             kr_id_map.KR20 = dso !== null ? [buildEntry(currentMonth, dso, KR_CONFIG.KR20)] : [];
-            kr_id_map.KR24 = dso !== null ? [buildEntry(currentMonth, dso, KR_CONFIG.KR24)] : [];
 
+            // --- KR24 : distribution ancienneté ---
+            kr_id_map.KR24 = [];
             const buckets = [
                 { label: "< 15j", min: -Infinity, max: 15 },
                 { label: "15-30j", min: 15, max: 30 },
@@ -378,9 +380,9 @@ export async function getFinanceDashboard(req: Request, res: Response) {
                 { label: "> 60j", min: 60, max: Infinity },
             ];
             const kr24Buckets = buckets.map((b) => {
-                const amount = overdue
-                    .filter((row) => { const age = parseFloat(row.age_days); return age >= b.min && age < b.max; })
-                    .reduce((a, row) => a + (parseFloat(row.balance) || 0), 0);
+                const amount = overdueInvoices
+                    .filter((inv) => inv.ageDays >= b.min && inv.ageDays < b.max)
+                    .reduce((a, inv) => a + inv.residual, 0);
                 return { label: b.label, amount: Math.round(amount * 100) / 100 };
             });
             (kr_id_map as any).__kr24Buckets = kr24Buckets;
