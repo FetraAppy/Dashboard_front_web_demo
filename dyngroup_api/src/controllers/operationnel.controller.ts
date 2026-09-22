@@ -387,20 +387,14 @@ export async function getDashboardData(req: Request, res: Response) {
         }
 
         // Query per-employee vacation allocation (days → hours × 8)
-        // Chaîne de secours : table KPI → staging.hr_leave_allocation → défaut 22 jours (176h)
+        // Chaîne de secours : staging.hr_leave_allocation (live) → table KPI (repli) → défaut
+        // 22 jours (176h). staging.hr_leave_allocation d'abord (2026-09-22) : c'est la lecture
+        // directe des allocations Odoo, toujours à jour ; kpi.operationnel_solde_vacances est un
+        // calcul figé d'un ancien run Airflow, jamais resynchronisé depuis — repéré en désaccord
+        // avec Odoo pour BURION Jade (172.8h vs 172.43h réels, une allocation ajoutée après ce
+        // calcul). La table KPI ne sert plus que de repli si staging n'est pas encore extraite.
         const empVacMap: Record<number, number> = {};
         const vacSources: (() => Promise<boolean>)[] = [
-            async () => {
-                const res = await pool.query(
-                    `SELECT employee_id, jours_alloues
-                     FROM kpi.operationnel_solde_vacances`
-                );
-                if (res.rows.length === 0) return false;
-                res.rows.forEach(v => {
-                    empVacMap[v.employee_id] = (parseFloat(v.jours_alloues) || 0) * 8;
-                });
-                return true;
-            },
             async () => {
                 const res = await pool.query(
                     `SELECT employee_id, SUM(number_of_days::float) AS jours
@@ -413,6 +407,17 @@ export async function getDashboardData(req: Request, res: Response) {
                 if (res.rows.length === 0) return false;
                 res.rows.forEach(v => {
                     empVacMap[v.employee_id] = (parseFloat(v.jours) || 0) * 8;
+                });
+                return true;
+            },
+            async () => {
+                const res = await pool.query(
+                    `SELECT employee_id, jours_alloues
+                     FROM kpi.operationnel_solde_vacances`
+                );
+                if (res.rows.length === 0) return false;
+                res.rows.forEach(v => {
+                    empVacMap[v.employee_id] = (parseFloat(v.jours_alloues) || 0) * 8;
                 });
                 return true;
             }
