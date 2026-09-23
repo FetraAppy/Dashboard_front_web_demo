@@ -787,13 +787,17 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
         // Cumul basé sur variableHoursMonth (calculé par personne puis sommé), pas sur
         // filteredRealHours[i]/theoHours[i] agrégés — voir commentaire sur variableHoursMonth.
+        // Calculé sur les 12 mois (pas .slice(0, months) avant d'indexer) — même bug que le
+        // graphique "Suivi de l'objectif mensuel" (corrigé le 2026-09-23) : en vue mois unique,
+        // cumVarAll n'aurait contenu que l'élément d'index 0 (janvier), et cumVarAll[activeMonthIndex]
+        // pour tout autre mois tombait hors limites → point manquant sur la courbe.
         let runningVar = 0;
-        const cumVarAll = this.filteredRealHours.slice(0, months).map((r, i) => {
+        const cumVarAll = this.filteredRealHours.map((r, i) => {
           if (r === 0) return null;
           runningVar += this.variableHoursMonth[i] || 0;
           return runningVar;
         });
-        const cumVarData = isAllMonths ? cumVarAll : [cumVarAll[activeMonthIndex]];
+        const cumVarData = isAllMonths ? cumVarAll.slice(0, months) : [cumVarAll[activeMonthIndex]];
 
         this.chartHeures = new Chart(ctx, {
           type: 'bar',
@@ -942,18 +946,24 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // périmètre dans l'onglet "Objectif") ne peut pas produire un "écart" valide — sinon tout
         // le CA réalisé apparaît à tort comme un dépassement de 100%. On traite ces mois comme
         // sans donnée (null) plutôt que de comparer à un objectif à zéro.
-        const ecartsAll = this.filteredCaReal.slice(0, months).map((v, i) =>
+        // Calculé sur les 12 mois (pas .slice(0, months) avant d'indexer) : sinon, en vue mois
+        // unique (months=1), ecartsAll/cumCAAll ne contenaient que l'élément d'index 0 (janvier),
+        // et ecartsAll[activeMonthIndex] pour tout autre mois (ex. février, index 1) tombait hors
+        // limites → undefined → graphique vide, sauf pour janvier ou "tous les mois" — corrigé
+        // le 2026-09-23. cumCAAll doit aussi rester cumulé depuis janvier même pour un seul mois
+        // affiché (sinon le cumulé d'un mois isolé ne reflèterait que ce mois-là).
+        const ecartsAll = this.filteredCaReal.map((v, i) =>
           (v > 0 && this.caObjectifChf[i] > 0) ? v - this.caObjectifChf[i] : null);
         let runningCA = 0;
-        const cumCAAll = this.filteredCaReal.slice(0, months).map((v, i) => {
+        const cumCAAll = this.filteredCaReal.map((v, i) => {
           if (v === 0 || this.caObjectifChf[i] === 0) return null;
           runningCA += v - this.caObjectifChf[i];
           return runningCA;
         });
 
         const labels = isAllMonths ? MS.slice(0, months) : [MS[activeMonthIndex]];
-        const ecartsData = isAllMonths ? ecartsAll : [ecartsAll[activeMonthIndex]];
-        const cumCAData = isAllMonths ? cumCAAll : [cumCAAll[activeMonthIndex]];
+        const ecartsData = isAllMonths ? ecartsAll.slice(0, months) : [ecartsAll[activeMonthIndex]];
+        const cumCAData = isAllMonths ? cumCAAll.slice(0, months) : [cumCAAll[activeMonthIndex]];
         const ecartBgColors = isAllMonths
           ? ecartsAll.map(v => v === null ? (this.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)') : v >= 0 ? (this.isDark ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.7)') : (this.isDark ? 'rgba(239, 68, 68, 0.35)' : 'rgba(239, 68, 68, 0.7)'))
           : [ecartsAll[activeMonthIndex] === null ? (this.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)') : ecartsAll[activeMonthIndex]! >= 0 ? (this.isDark ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.7)') : (this.isDark ? 'rgba(239, 68, 68, 0.35)' : 'rgba(239, 68, 68, 0.7)')];
