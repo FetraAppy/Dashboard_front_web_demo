@@ -336,8 +336,8 @@
                 <td style="text-align: right;">{{ formatHours(totalTheoHoursFullYear) }}</td>
                 <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
                 <td style="text-align: right;">
-                  <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
-                  <span *ngIf="totalRealHours === 0">—</span>
+                  <span *ngIf="totalRealHours > 0 && totalTheoHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
+                  <span *ngIf="totalRealHours === 0 || totalTheoHours === 0">—</span>
                 </td>
                 <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
                 <!-- <td style="text-align: right;">{{ formatNumber(totalCaBudget) }}</td> désactivé sur demande -->
@@ -554,8 +554,8 @@
               <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
               <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
               <td style="text-align: right;">
-                <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
-                <span *ngIf="totalRealHours === 0">—</span>
+                <span *ngIf="totalRealHours > 0 && totalTheoHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
+                <span *ngIf="totalRealHours === 0 || totalTheoHours === 0">—</span>
               </td>
               <td style="text-align: right;">{{ totalFactHours > 0 ? formatHours(totalFactHours) : '—' }}</td>
               <td style="text-align: right;">
