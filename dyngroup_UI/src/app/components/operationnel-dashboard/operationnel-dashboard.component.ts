@@ -791,9 +791,11 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // graphique "Suivi de l'objectif mensuel" (corrigé le 2026-09-23) : en vue mois unique,
         // cumVarAll n'aurait contenu que l'élément d'index 0 (janvier), et cumVarAll[activeMonthIndex]
         // pour tout autre mois tombait hors limites → point manquant sur la courbe.
+        // Ne saute plus les mois à 0h réalisée (ex. mois futurs) : "tous les mois" doit montrer
+        // les 12 mois — la valeur ne change pas (variableHoursMonth y vaut déjà 0), seule la
+        // ligne continue maintenant à plat au lieu de s'arrêter avec un trou (2026-09-24).
         let runningVar = 0;
         const cumVarAll = this.filteredRealHours.map((r, i) => {
-          if (r === 0) return null;
           runningVar += this.variableHoursMonth[i] || 0;
           return runningVar;
         });
@@ -942,10 +944,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         const activeMonthIndex = isAllMonths ? -1 : parseInt(this.activeMonth);
         const months = isAllMonths ? 12 : 1;
 
-        // Un mois sans objectif CHF réel (caObjectifChf = 0, aucune donnée Odoo saisie pour ce
-        // périmètre dans l'onglet "Objectif") ne peut pas produire un "écart" valide — sinon tout
-        // le CA réalisé apparaît à tort comme un dépassement de 100%. On traite ces mois comme
-        // sans donnée (null) plutôt que de comparer à un objectif à zéro.
+        // Un mois SANS OBJECTIF saisi (caObjectifChf = 0, aucune donnée Odoo dans l'onglet
+        // "Objectif") ne peut pas produire un "écart" valide — sinon le CA réalisé apparaît à
+        // tort comme un dépassement. Ces mois-là restent "sans donnée" (null, pas de barre).
+        // Mais un mois AVEC un objectif saisi doit toujours afficher sa barre, même sans réalisé
+        // (ex. Igor, octobre 2026 : 30'000 CHF d'objectif, 0 CHF réalisé car le mois n'a pas
+        // encore eu lieu → barre rouge -30'000, pas une barre manquante) — "tous les mois" doit
+        // montrer les 12 mois dès qu'une donnée existe, pas seulement jusqu'au mois courant,
+        // demande utilisateur du 2026-09-24.
         // Calculé sur les 12 mois (pas .slice(0, months) avant d'indexer) : sinon, en vue mois
         // unique (months=1), ecartsAll/cumCAAll ne contenaient que l'élément d'index 0 (janvier),
         // et ecartsAll[activeMonthIndex] pour tout autre mois (ex. février, index 1) tombait hors
@@ -953,11 +959,16 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         // le 2026-09-23. cumCAAll doit aussi rester cumulé depuis janvier même pour un seul mois
         // affiché (sinon le cumulé d'un mois isolé ne reflèterait que ce mois-là).
         const ecartsAll = this.filteredCaReal.map((v, i) =>
-          (v > 0 && this.caObjectifChf[i] > 0) ? v - this.caObjectifChf[i] : null);
+          this.caObjectifChf[i] > 0 ? v - this.caObjectifChf[i] : null);
+        // Cumul : ne saute JAMAIS un mois (contrairement à ecartsAll ci-dessus) — sinon la courbe
+        // divergeait de la carte RÉALISÉ (Σ CA réalisé − Σ Objectif sur l'année complète, sans
+        // exception), qui elle ne saute rien. Un mois avec du CA réalisé mais sans objectif saisi
+        // (ex. Igor, mars 2026 : 17'962.50 CHF de CA, 0 CHF d'objectif) disparaissait entièrement
+        // du cumul alors qu'il compte pleinement dans le total de la carte — écart de ~12k CHF
+        // constaté et corrigé le 2026-09-24.
         let runningCA = 0;
         const cumCAAll = this.filteredCaReal.map((v, i) => {
-          if (v === 0 || this.caObjectifChf[i] === 0) return null;
-          runningCA += v - this.caObjectifChf[i];
+          runningCA += v - (this.caObjectifChf[i] || 0);
           return runningCA;
         });
 
