@@ -376,7 +376,7 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
     const el13 = document.getElementById('fi-kr13') as HTMLCanvasElement | null;
     if (el13) {
       const couleur = (v: number | null) =>
-        v === null ? C.gr : v >= 10 ? C.rd : v >= 5 ? '#f97316' : '#22c55e';
+        v === null ? C.gr : (v >= 10 || v <= -10)? C.rd : (v >= 5 || v <= -5 )? '#f97316' : '#22c55e';
       this.charts.push(new Chart(el13.getContext('2d')!, {
         type: 'bar',
         data: {

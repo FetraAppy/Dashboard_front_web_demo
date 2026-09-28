@@ -290,7 +290,8 @@ export async function getFinanceDashboard(req: Request, res: Response) {
                 const realise = pos6;
                 const budget13 = trailingAvg(kr13Hist);
                 if (budget13 === null || budget13 === 0) {
-                    kr13All.push(buildEntry(row.month, realise, { ...KR_CONFIG.KR13, thresholdType: "absolute" }, null));
+                    // kr13All.push(buildEntry(row.month, realise, { ...KR_CONFIG.KR13, thresholdType: "absolute" }, null));
+                    kr13All.push(buildEntry(row.month, 0, { ...KR_CONFIG.KR13, thresholdType: "absolute" }, null));
                 } else {
                     const depassementPct = Math.round(((realise - budget13) / Math.abs(budget13)) * 10000) / 100;
                     const entry = buildEntry(row.month, depassementPct, KR_CONFIG.KR13, 0);
