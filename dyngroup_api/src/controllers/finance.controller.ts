@@ -308,7 +308,7 @@ export async function getFinanceDashboard(req: Request, res: Response) {
 
         // --- KR11 — Trésorerie (mouvement bancaire net mensuel) ---------------------
         {
-            const params: any[] = [dateFrom, dateTo];
+            const params: any[] = [dateFrom.slice(0, 7), dateTo.slice(0, 7)];
             let companyClause = "";
             if (companies) { params.push(companies); companyClause = ` AND bsl.company_id = ANY($${params.length}::int[])`; }
             // const r = await pool.query(
