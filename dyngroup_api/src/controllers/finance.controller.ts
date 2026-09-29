@@ -311,23 +311,59 @@ export async function getFinanceDashboard(req: Request, res: Response) {
             const params: any[] = [dateFrom, dateTo];
             let companyClause = "";
             if (companies) { params.push(companies); companyClause = ` AND bsl.company_id = ANY($${params.length}::int[])`; }
+            // const r = await pool.query(
+            //     `SELECT TO_CHAR(bsl.date::date, 'YYYY-MM') AS month, SUM(bsl.amount / COALESCE(rate.rate, 1)) AS bank_movement_chf
+            //      FROM staging."account_bank_statement_line" bsl
+            //      JOIN staging."account_journal" j ON j.id = bsl.journal_id
+            //      JOIN staging."account_move" m ON m.id = bsl.move_id
+            //      LEFT JOIN LATERAL (
+            //         SELECT r.rate
+            //         FROM staging."res_currency_rate" r
+            //         WHERE r.currency_id = m.currency_id
+            //         AND r.company_id = m.company_id
+            //         AND r.name::date <= bsl.date::date
+            //         ORDER BY r.name::date DESC
+            //         LIMIT 1
+            //      ) rate ON TRUE
+            //      WHERE j.type = 'bank' AND bsl.date IS NOT NULL
+            //        AND bsl.date::date BETWEEN $1 AND $2${companyClause}
+            //      GROUP BY 1 ORDER BY 1`,
+            //     params
+            // );
             const r = await pool.query(
-                `SELECT TO_CHAR(bsl.date::date, 'YYYY-MM') AS month, SUM(bsl.amount / COALESCE(rate.rate, 1)) AS bank_movement_chf
-                 FROM staging."account_bank_statement_line" bsl
-                 JOIN staging."account_journal" j ON j.id = bsl.journal_id
-                 JOIN staging."account_move" m ON m.id = bsl.move_id
-                 LEFT JOIN LATERAL (
-                    SELECT r.rate
-                    FROM staging."res_currency_rate" r
-                    WHERE r.currency_id = m.currency_id
-                    AND r.company_id = m.company_id
-                    AND r.name::date <= bsl.date::date
-                    ORDER BY r.name::date DESC
-                    LIMIT 1
-                 ) rate ON TRUE
-                 WHERE j.type = 'bank' AND bsl.date IS NOT NULL
-                   AND bsl.date::date BETWEEN $1 AND $2${companyClause}
-                 GROUP BY 1 ORDER BY 1`,
+                `WITH montly_added AS (
+                    WITH monthly AS (
+                        SELECT TO_CHAR(bsl.date::date, 'YYYY-MM') AS month, SUM(bsl.amount / COALESCE(rate.rate, 1)) AS bank_movement_chf
+                        FROM staging."account_bank_statement_line" bsl
+                        JOIN staging."account_journal" j ON j.id = bsl.journal_id
+                        JOIN staging."account_move" m ON m.id = bsl.move_id
+                        LEFT JOIN LATERAL (
+                            SELECT r.rate
+                            FROM staging."res_currency_rate" r
+                            WHERE r.currency_id = m.currency_id
+                            AND r.company_id = m.company_id
+                            AND r.name::date <= bsl.date::date
+                            ORDER BY r.name::date DESC
+                            LIMIT 1
+                        ) rate ON TRUE
+                        WHERE j.type = 'bank' AND bsl.date IS NOT NULL
+                        AND m.state = 'posted' ${companyClause}
+                        GROUP BY 1 ORDER BY 1
+                
+                    ) 
+                    SELECT
+                        month , 
+                        SUM(bank_movement_chf) OVER (ORDER BY month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS bank_movement_chf
+                    FROM montly
+                    ORDER BY month
+                )
+                SELECT 
+                    month,
+                    bank_movement_chf
+                FROM montly_added    
+                WHERE month BETWEEN TO_CHAR($1::date, 'YYYY-MM') AND TO_CHAR($2::date, 'YYYY-MM')
+                ORDER BY month
+                `,
                 params
             );
             kr_id_map.KR11 = r.rows.map((row) => buildEntry(row.month, parseFloat(row.bank_movement_chf) || 0, KR_CONFIG.KR11));
