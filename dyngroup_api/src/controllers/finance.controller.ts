@@ -361,7 +361,7 @@ export async function getFinanceDashboard(req: Request, res: Response) {
                     month,
                     bank_movement_chf
                 FROM montly_added    
-                WHERE month BETWEEN TO_CHAR($1::date, 'YYYY-MM') AND TO_CHAR($2::date, 'YYYY-MM')
+                WHERE month BETWEEN $1 AND $2
                 ORDER BY month
                 `,
                 params
