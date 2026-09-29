@@ -354,7 +354,7 @@ export async function getFinanceDashboard(req: Request, res: Response) {
                     SELECT
                         month , 
                         SUM(bank_movement_chf) OVER (ORDER BY month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS bank_movement_chf
-                    FROM montly
+                    FROM monthly
                     ORDER BY month
                 )
                 SELECT 
