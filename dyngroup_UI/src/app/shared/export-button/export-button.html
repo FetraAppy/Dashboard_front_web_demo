@@ -1,0 +1,11 @@
+<button
+  type="button"
+  class="export-btn"
+  (click)="export()"
+  [disabled]="loading"
+  [attr.aria-busy]="loading"
+  title="Exporter ce KPI en Excel (avec les filtres actifs)"
+>
+  <span class="export-icon" aria-hidden="true">⬇</span>
+  <span>{{ loading ? 'Export…' : 'Excel' }}</span>
+</button>

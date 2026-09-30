@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Chart, registerables } from 'chart.js';
 import { environment } from '../../../environments/environment';
 import { FormatService } from '../../shared/format.service';
+import { KpiExportParams } from '../../shared/kpi-export.service';
 
 Chart.register(...registerables);
 
@@ -415,6 +416,20 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     const yearText = this.activeYear;
     const monthText = this.activeMonth === 'all' ? 'Toute l\'année' : MF[parseInt(this.activeMonth)];
     return [collabText, companyText, yearText, monthText].filter(Boolean).join(' · ');
+  }
+
+  /**
+   * Filtres actifs au format de l'API d'export (GET /api/operationnel/export/:kpiId) — à passer
+   * au bouton <app-export-button [params]="exportParams">. activeMonth est un index 0-11,
+   * l'API attend un mois 1-12.
+   */
+  get exportParams(): KpiExportParams {
+    return {
+      annee: this.activeYear,
+      mois: this.activeMonth === 'all' ? 'all' : String(parseInt(this.activeMonth, 10) + 1),
+      collab: this.activeCollab,
+      companies: this.activeCompanies,
+    };
   }
 
   mathRound(val: number): number {
