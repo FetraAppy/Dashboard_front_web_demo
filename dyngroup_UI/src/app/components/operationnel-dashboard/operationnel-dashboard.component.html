@@ -411,7 +411,8 @@
         <!-- Non Facturable Chart -->
         <div class="card">
           <div class="chart-title">Heures non facturables cumulées</div>
-          <div class="chart-subtitle">Répartition par catégorie — {{ getFilterInfo() }} — Total : {{ formatHours(nonFactTotal) }}</div>
+          <div class="chart-subtitle">Répartition par catégorie — {{ getFilterInfo() }}</div>
+          <div class="chart-subtitle"><strong>Total : {{ formatHours(nonFactTotal) }}</strong></div>
           <div class="chart-container" style="height: 230px;">
             <canvas #chNonFactCanvas></canvas>
           </div>
