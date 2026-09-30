@@ -782,9 +782,14 @@ export async function getDashboardData(req: Request, res: Response) {
                 `SELECT
                    aal.employee_id,
                    EXTRACT(MONTH FROM aal.date::date)::int AS mois,
+                   -- Ne garde que la partie avant la parenthèse du nom Odoo (ex. "Formation
+                   -- (Nouveaux collaborateurs-trices et personnes en formation)" -> "Formation") :
+                   -- les tâches de "CLIENT DYN SA - INTERNE" suivent la convention "Libellé
+                   -- court (détail long)" — reste dynamique (aucun nom en dur), juste plus lisible
+                   -- (2026-09-30, demande utilisateur).
                    COALESCE(
-                     hlt.name,
-                     CASE WHEN pp.name = 'CLIENT DYN SA - INTERNE' THEN pt.name END,
+                     TRIM(SPLIT_PART(hlt.name, '(', 1)),
+                     CASE WHEN pp.name = 'CLIENT DYN SA - INTERNE' THEN TRIM(SPLIT_PART(pt.name, '(', 1)) END,
                      'Administratif'
                    ) AS category,
                    SUM(aal.unit_amount) AS hours
