@@ -613,10 +613,12 @@ export async function getDashboardData(req: Request, res: Response) {
                 mal_m: Array(12).fill(0),
                 abs_m: Array(12).fill(0),
                 vac_init: vacInitH,
-                non_fact: {
-                    admin: Array(12).fill(0), vacances: Array(12).fill(0), rh_it: Array(12).fill(0),
-                    marketing: Array(12).fill(0), formation: Array(12).fill(0), maladie: Array(12).fill(0)
-                },
+                // Catégories dynamiques (2026-09-30) : plus de liste figée (admin/vacances/rh_it/
+                // marketing/formation/maladie) — chaque clé est créée à la volée depuis le nom réel
+                // du type de congé Odoo ou de la tâche, voir la requête "Non-facturable categories"
+                // plus bas. Une nouvelle catégorie ajoutée dans Odoo (nouveau type de congé, nouvelle
+                // tâche sous "CLIENT DYN SA - INTERNE") apparaît automatiquement, sans code à changer.
+                non_fact: {} as Record<string, number[]>,
                 // Priorité à xx_hourly_price (empPriceMap) : c'est le tarif de référence RH
                 // saisi sur la fiche employé Odoo ("Hourly Price"), pas la moyenne des prix de
                 // vente réels (empTarifMap) qui varie selon les mandats facturés. Vérifié sur
@@ -754,41 +756,51 @@ export async function getDashboardData(req: Request, res: Response) {
             // travail productif dont le prix de vente n'était pas renseigné, ce qui gonflait
             // artificiellement "Administratif" (le fallback ELSE) très au-delà de la réalité
             // (ex: AGACHII Igor).
-            // "formation"/"marketing"/"rh_it" détectées via la tâche Odoo (project_task.name),
-            // scopées au projet "CLIENT DYN SA - INTERNE" — pas par mot-clé dans le nom libre du
-            // timesheet comme avant (2026-09-16, demande utilisateur) : les tâches de ce projet
-            // sont une nomenclature stable/curatée par les RH, contrairement au texte libre saisi
-            // par chacun. Basé sur le nom de la TÂCHE (pas un id figé) pour qu'une nouvelle tâche
-            // ajoutée plus tard sous ce projet soit prise en compte automatiquement, sans
-            // modification de code. "admin" = tout le reste (heures non productives qui ne sont
-            // ni un congé, ni une tâche marketing/rh-it/formation de ce projet) — inclut donc les
-            // autres tâches internes (Administratif, Facturation, Innovation...) ET du vrai
-            // travail client non encore flagué "Productivité" dans Odoo (cas non résolu ici,
-            // dépend de la saisie Odoo — vérifié sur NETO DA SILVA Inês).
+            // Catégories 100% DYNAMIQUES (2026-09-30, demande utilisateur) — plus de liste figée
+            // (admin/vacances/rh_it/marketing/formation/maladie) : chaque catégorie est le nom réel
+            // Odoo, découvert à la volée, pour qu'un nouveau type de congé ou une nouvelle tâche
+            // ajoutés dans Odoo apparaissent automatiquement sans modification de code.
+            // - Congé : account_analytic_line.holiday_id → hr_leave → hr_leave_type.name (le VRAI
+            //   type de congé), pas un motif texte sur le nom de la ligne. Odoo nomme chaque ligne
+            //   générée automatiquement "Congé (X/N)" où X = le jour DANS la demande (pas le type
+            //   de congé) et N = le nombre total de jours de cette demande — un congé de 10 jours
+            //   produit "Congé (1/10)" à "Congé (10/10)". Un ancien filtre LIKE 'Congé (1/%' ne
+            //   capturait donc que le 1er jour de chaque congé, et LIKE 'Congé (7/%'/'8/%'/'14/%'
+            //   (censé cibler les types de congé maladie 7/8/14) attrapait par collision les jours
+            //   7, 8 et 14 de N'IMPORTE QUEL congé multi-jours — vérifié sur AGACHII Igor : 136h de
+            //   vacances validées éclatées en 56h "vacances" + 16h "maladie" + 64h "admin" selon la
+            //   position du jour dans la demande. holiday_id est fiable quelle que soit la durée.
+            // - Tâche : le nom de la tâche Odoo (project_task.name) directement, scopé au projet
+            //   "CLIENT DYN SA - INTERNE" (nomenclature stable/curatée par les RH, contrairement au
+            //   texte libre saisi par chacun) — plus de regroupement par mot-clé (formation/
+            //   marketing/rh-it) en dur.
+            // - "Administratif" = repli (heures non productives qui ne sont ni un congé, ni une
+            //   tâche de ce projet) — inclut le vrai travail client non encore flagué "Productivité"
+            //   dans Odoo (cas non résolu ici, dépend de la saisie Odoo — vérifié sur NETO DA SILVA
+            //   Inês).
             pool.query(
                 `SELECT
                    aal.employee_id,
                    EXTRACT(MONTH FROM aal.date::date)::int AS mois,
-                   CASE
-                     WHEN aal.name LIKE 'Congé (1/%' THEN 'vacances'
-                     WHEN aal.name LIKE 'Congé (7/%' OR aal.name LIKE 'Congé (8/%' OR aal.name LIKE 'Congé (14/%' THEN 'maladie'
-                     WHEN aal.name LIKE 'Congé (%' THEN 'admin'
-                     WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%formation%' OR LOWER(pt.name) LIKE '%école%' OR LOWER(pt.name) LIKE '%ecole%' OR LOWER(pt.name) LIKE '%diplome%') THEN 'formation'
-                     WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%marketing%' OR LOWER(pt.name) LIKE '%commercial%') THEN 'marketing'
-                     WHEN pp.name = 'CLIENT DYN SA - INTERNE' AND (LOWER(pt.name) LIKE '%informatique%' OR LOWER(pt.name) LIKE '%ressources humaines%') THEN 'rh_it'
-                     ELSE 'admin'
-                   END AS category,
+                   COALESCE(
+                     hlt.name,
+                     CASE WHEN pp.name = 'CLIENT DYN SA - INTERNE' THEN pt.name END,
+                     'Administratif'
+                   ) AS category,
                    SUM(aal.unit_amount) AS hours
                  FROM staging.account_analytic_line aal
                  LEFT JOIN staging.project_task pt ON pt.id = aal.task_id
                  LEFT JOIN staging.project_project pp ON pp.id = pt.project_id
+                 LEFT JOIN staging.hr_leave hl ON hl.id = aal.holiday_id
+                 LEFT JOIN staging.hr_leave_type hlt ON hlt.id = hl.holiday_status_id
                  WHERE (aal.productivity = false OR aal.productivity IS NULL)
                    AND aal.date IS NOT NULL
                    AND EXTRACT(YEAR FROM aal.date::date) = $1
                    -- Même exclusion que "H. réalisées"/"H. Productivité" (requêtes 10/11) : les
                    -- lignes "Congé (N/M)" à amount=0, auto-générées par Odoo pour les jours fériés
-                   -- d'entreprise, ne sont pas de vraies heures — sans cette exclusion elles
-                   -- gonflaient "admin"/"maladie" au-delà de (H.réalisées - H.Productivité).
+                   -- d'entreprise (pas liées à un hr.leave personnel, holiday_id est NULL pour
+                   -- elles), ne sont pas de vraies heures — sans cette exclusion elles gonflaient
+                   -- "Administratif" au-delà de (H.réalisées - H.Productivité).
                    AND NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)
                  GROUP BY aal.employee_id, 2, 3`,
                 [annee]
@@ -1002,11 +1014,15 @@ export async function getDashboardData(req: Request, res: Response) {
             }
         });
 
-        // Process non-facturable categories breakdown, par mois
+        // Process non-facturable categories breakdown, par mois — catégories dynamiques : on crée
+        // la clé (tableau de 12 mois) à la première rencontre de cette catégorie pour cet employé.
         nonFactRes.rows.forEach(row => {
             const empName = empNameMap[row.employee_id];
             const mIdx = row.mois - 1;
-            if (empName && collab[empName] && mIdx >= 0 && mIdx < 12 && collab[empName].non_fact[row.category] !== undefined) {
+            if (empName && collab[empName] && mIdx >= 0 && mIdx < 12 && row.category) {
+                if (!collab[empName].non_fact[row.category]) {
+                    collab[empName].non_fact[row.category] = Array(12).fill(0);
+                }
                 collab[empName].non_fact[row.category][mIdx] = parseFloat(row.hours) || 0;
             }
         });

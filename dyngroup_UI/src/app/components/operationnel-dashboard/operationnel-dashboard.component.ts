@@ -1065,7 +1065,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     if (this.chNonFactCanvas) {
       const ctx = this.chNonFactCanvas.nativeElement.getContext('2d');
       if (ctx) {
-        let nf = { admin: 0, vacances: 0, rh_it: 0, marketing: 0, formation: 0, maladie: 0 };
+        // Catégories 100% dynamiques (2026-09-30, demande utilisateur) : plus de liste figée —
+        // chaque clé de non_fact vient du backend (nom réel du type de congé Odoo ou de la
+        // tâche, voir operationnel.controller.ts). Une nouvelle catégorie ajoutée dans Odoo
+        // apparaît donc ici automatiquement, sans changement de code. Plus besoin non plus du
+        // cas spécial "Vacances" (source hr_leave) : maintenant que la catégorisation des
+        // congés se base sur holiday_id → hr_leave_type (corrigé le 2026-09-30), la catégorie
+        // "Paid Time Off" calculée ici correspond déjà exactement au total hr_leave.
+        const nf: Record<string, number> = {};
 
         // Mois retenus : un seul mois sélectionné, ou l'année complète janvier-décembre —
         // même logique que les autres graphiques/tableaux (voir calculateData()).
@@ -1083,26 +1090,26 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         collabNames.forEach(name => {
           const c = this.collabData[name];
           if (c?.non_fact) {
-            Object.keys(nf).forEach(k => {
-              const key = k as keyof typeof nf;
-              if (key === 'vacances') return; // voir ci-dessous — source hr_leave, pas account_analytic_line
-              const arr: number[] = c.non_fact[key] || [];
-              monthIndices.forEach(i => { nf[key] += arr[i] || 0; });
+            Object.keys(c.non_fact).forEach(category => {
+              const arr: number[] = c.non_fact[category] || [];
+              const sum = monthIndices.reduce((s, i) => s + (arr[i] || 0), 0);
+              nf[category] = (nf[category] || 0) + sum;
             });
           }
         });
-        // Vacances : mêmes chiffres que "Suivi heure variable & Vacances" (this.vacationsMonth,
-        // issu de hr_leave/holiday_status_id=1, congé RH validé, réparti jour ouvré par jour
-        // ouvré) — décision utilisateur du 2026-09-22 : priorité à la cohérence avec ce tableau,
-        // quitte à ce que Σ catégories de CE graphique ne corresponde plus exactement à
-        // H.réalisées − H.Productivité (56h en feuille de temps vs 136h en congé validé pour
-        // Igor, ex. concret — les deux ne mesurent pas la même chose, voir explication donnée
-        // en chat).
-        nf.vacances = monthIndices.reduce((s, i) => s + (this.vacationsMonth[i] || 0), 0);
 
-        const labels = ['Administratif', 'Vacances', 'RH / IT', 'Marketing', 'Formation', 'Maladie'];
-        const values = [nf.admin, nf.vacances, nf.rh_it, nf.marketing, nf.formation, nf.maladie];
-        const colors = ['#f97316', '#94a3b8', '#14b8a6', '#d946ef', '#3b82f6', '#ef4444'];
+        // Ne garde que les catégories avec des heures réellement présentes (0h = pas affiché,
+        // demande utilisateur), triées par volume décroissant pour la lisibilité.
+        const entries = Object.entries(nf)
+          .filter(([, hours]) => hours > 0)
+          .sort((a, b) => b[1] - a[1]);
+
+        const labels = entries.map(([category]) => category);
+        const values = entries.map(([, hours]) => hours);
+        // Palette cyclique (pas une couleur par catégorie figée en dur, puisque le nombre de
+        // catégories est désormais variable).
+        const palette = ['#f97316', '#94a3b8', '#14b8a6', '#d946ef', '#3b82f6', '#ef4444', '#eab308', '#22c55e', '#0ea5e9', '#a855f7'];
+        const colors = labels.map((_, i) => palette[i % palette.length]);
 
         this.chartNonFact = new Chart(ctx, {
           type: 'bar',
