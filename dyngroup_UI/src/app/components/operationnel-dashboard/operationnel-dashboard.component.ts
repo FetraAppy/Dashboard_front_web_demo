@@ -99,6 +99,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // très différent de la somme des "Total/Période" individuels (bug confirmé le 2026-09-21 :
   // -926h en vue globale vs +354h en sommant les fiches, pour janvier 2026 seul).
   variableHoursMonth: number[] = [];
+  /** Total du graphique "Heures non facturables cumulées" (Σ de toutes les catégories affichées). */
+  nonFactTotal = 0;
 
   // KPI aggregates
   kpiObjFact = 0;
@@ -1106,6 +1108,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
         const labels = entries.map(([category]) => category);
         const values = entries.map(([, hours]) => hours);
+        this.nonFactTotal = values.reduce((s, v) => s + v, 0);
         // Palette cyclique (pas une couleur par catégorie figée en dur, puisque le nombre de
         // catégories est désormais variable).
         const palette = ['#f97316', '#94a3b8', '#14b8a6', '#d946ef', '#3b82f6', '#ef4444', '#eab308', '#22c55e', '#0ea5e9', '#a855f7'];
