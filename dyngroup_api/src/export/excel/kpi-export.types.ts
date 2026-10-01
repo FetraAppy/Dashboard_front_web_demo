@@ -27,6 +27,10 @@ export interface KpiDefinition {
     cible?: string;
     sourceOdoo?: string;
     tables: string[];
+    /**
+     * N'est plus affiché dans le classeur (retiré de la feuille Informations le 2026-10-01, demande
+     * utilisateur) — conservé uniquement pour que les exporteurs existants compilent encore.
+     */
     commentaires?: string[];
     colonnes?: KpiColonne[];
 }
@@ -72,10 +76,12 @@ export type DataValue = string | number | boolean | Date | null | undefined | Fo
 export interface DataSheet {
     /** Nom de l'onglet Excel — 31 caractères max, sans []:*?/\ (nettoyé automatiquement). */
     name: string;
-    /** Rappelée dans la feuille "Informations", pour expliquer le contenu de l'onglet. */
+    /** Affichée en note (au survol) sur la 1re cellule d'en-tête de l'onglet. */
     description?: string;
     columns: DataColumn[];
     rows: Record<string, DataValue>[];
+    /** La dernière ligne est une ligne Total : mise en évidence (gras, fond, bordure). */
+    lastRowIsTotal?: boolean;
 }
 
 export interface KpiExport {

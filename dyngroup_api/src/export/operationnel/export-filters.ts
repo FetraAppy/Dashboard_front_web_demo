@@ -108,6 +108,9 @@ export async function resolveEmployeeScope(f: OperationnelExportFilters): Promis
     };
 }
 
+/** "2026-01-31" → "31.01.2026" (format des dates du classeur). */
+const frDay = (iso: string) => iso.split("-").reverse().join(".");
+
 /** Bloc "Filtres appliqués" de la feuille Informations. */
 export function describeFilters(f: OperationnelExportFilters, scope: EmployeeScope): FiltreAffiche[] {
     const exportedAt = new Date().toLocaleString("fr-CH", { timeZone: "Europe/Zurich" });
@@ -116,7 +119,7 @@ export function describeFilters(f: OperationnelExportFilters, scope: EmployeeSco
         { label: "Société(s)", value: f.companies.length ? f.companies.join(", ") : "Toutes les sociétés" },
         { label: "Année", value: String(f.annee) },
         { label: "Mois", value: f.mois ? MOIS[f.mois - 1] : "Tous les mois (janvier-décembre)" },
-        { label: "Période couverte", value: `du ${scope.dateFrom} au ${scope.dateTo}` },
+        { label: "Période couverte", value: `du ${frDay(scope.dateFrom)} au ${frDay(scope.dateTo)}` },
         { label: "Exporté le", value: exportedAt },
     ];
 }

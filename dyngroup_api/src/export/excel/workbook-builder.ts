@@ -12,7 +12,31 @@ const MAX_EXPORT_BYTES = (parseFloat(process.env.EXPORT_MAX_MB || "") || 10) * 1
 // Excel limite l'imbrication des groupes de lignes à 7 niveaux.
 const MAX_OUTLINE_LEVEL = 7;
 
-const BOLD = { bold: true };
+// --- Style (inspiré du Google Sheet "documentation dashboard operationnel") ----------------------
+// Hiérarchie visuelle : titre du classeur > bandeau de section > en-tête de tableau > libellé > valeur.
+
+const FONT_NAME = "Arial";
+const COLORS = {
+    primary: "FF1F4E79",   // bandeaux de section, en-têtes des feuilles de données, titre
+    header: "FFD9E1F2",    // en-têtes de tableau de la feuille Informations
+    label: "FFF2F2F2",     // libellés (colonne A), étapes racines de l'arbre
+    total: "FFDDEBF7",     // ligne Total des feuilles de données
+    border: "FFBFBFBF",
+    subtitle: "FF595959",
+    white: "FFFFFFFF",
+};
+
+const font = (extra: Partial<ExcelJS.Font> = {}): Partial<ExcelJS.Font> => ({ name: FONT_NAME, size: 10, ...extra });
+const solid = (argb: string): ExcelJS.Fill => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+const THIN: Partial<ExcelJS.Border> = { style: "thin", color: { argb: COLORS.border } };
+const BOX: Partial<ExcelJS.Borders> = { top: THIN, left: THIN, bottom: THIN, right: THIN };
+
+// Feuille Informations : 6 colonnes (= le tableau "Colonnes" : Colonne | Description | Métier |
+// Formule | Source Odoo | Commentaires). Les valeurs longues sont fusionnées sur B:F (lignes
+// "libellé : valeur") ou C:F (détail de l'arbre), pour tenir sur une ou deux lignes.
+const INFO_WIDTHS = [28, 38, 30, 44, 28, 34];
+const INFO_COLS = INFO_WIDTHS.length;
+const LINE_HEIGHT = 13;
 
 /** Nom d'onglet valide pour Excel : sans []:*?/\ et 31 caractères max. */
 export function sanitizeSheetName(name: string): string {
@@ -72,28 +96,84 @@ function toCellValue(value: DataValue): ExcelJS.CellValue {
     return (value ?? null) as ExcelJS.CellValue;
 }
 
-/** Ligne "libellé : valeur" (libellé en gras en colonne A, valeur en colonne B). */
+/**
+ * Excel n'ajuste pas la hauteur d'une ligne dont le texte est dans une cellule fusionnée : on
+ * l'estime d'après la longueur du texte et la largeur (en caractères) de la zone fusionnée.
+ */
+function estimatedHeight(text: string, widthChars: number): number {
+    const lines = text.split("\n").reduce((n, p) => n + Math.max(1, Math.ceil(p.length / widthChars)), 0);
+    return Math.max(16, lines * LINE_HEIGHT + 4);
+}
+
+const sumWidths = (from: number, to: number) => INFO_WIDTHS.slice(from - 1, to).reduce((s, w) => s + w, 0);
+
+/** Applique un style à toutes les cellules d'une ligne, de la colonne `from` à `to` (1-based). */
+function styleCells(row: ExcelJS.Row, from: number, to: number, style: (cell: ExcelJS.Cell) => void) {
+    for (let c = from; c <= to; c++) style(row.getCell(c));
+}
+
+/** Titre du classeur (A1) + sous-titre : nom du KPI et onglet du dashboard. */
+function addSheetTitle(ws: ExcelJS.Worksheet, title: string, subtitle: string) {
+    const titleCell = ws.getCell(1, 1);
+    titleCell.value = title;
+    titleCell.font = font({ size: 16, bold: true, color: { argb: COLORS.primary } });
+    ws.getRow(1).height = 26;
+
+    const subCell = ws.getCell(2, 1);
+    subCell.value = subtitle;
+    subCell.font = font({ size: 11, italic: true, color: { argb: COLORS.subtitle } });
+}
+
+/** Bandeau de section (ex. "Filtres appliqués") : fond foncé, texte blanc, sur toute la largeur. */
+function addSectionTitle(ws: ExcelJS.Worksheet, rowNumber: number, title: string) {
+    const row = ws.getRow(rowNumber);
+    row.getCell(1).value = title;
+    ws.mergeCells(rowNumber, 1, rowNumber, INFO_COLS);
+    styleCells(row, 1, INFO_COLS, cell => {
+        cell.fill = solid(COLORS.primary);
+        cell.font = font({ size: 11, bold: true, color: { argb: COLORS.white } });
+        cell.alignment = { vertical: "middle" };
+    });
+    row.height = 20;
+}
+
+/** En-tête de tableau : gras, centré, fond clair, encadré. `spans` = nb de colonnes par en-tête. */
+function addHeaderRow(ws: ExcelJS.Worksheet, rowNumber: number, headers: string[], spans: number[] = []) {
+    const row = ws.getRow(rowNumber);
+    let col = 1;
+    headers.forEach((h, i) => {
+        const span = spans[i] ?? 1;
+        row.getCell(col).value = h;
+        if (span > 1) ws.mergeCells(rowNumber, col, rowNumber, col + span - 1);
+        col += span;
+    });
+    styleCells(row, 1, col - 1, cell => {
+        cell.fill = solid(COLORS.header);
+        cell.font = font({ bold: true, color: { argb: COLORS.primary } });
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        cell.border = BOX;
+    });
+    row.height = 18;
+}
+
+/** Ligne "libellé : valeur" : libellé en gras sur fond gris (A), valeur fusionnée sur B:F. */
 function addInfoLine(ws: ExcelJS.Worksheet, rowNumber: number, label: string, value: string) {
     const row = ws.getRow(rowNumber);
-    row.getCell(1).value = label;
-    row.getCell(1).font = BOLD;
-    row.getCell(1).alignment = { vertical: "top" };
+    const labelCell = row.getCell(1);
+    labelCell.value = label;
+    labelCell.font = font({ bold: true });
+    labelCell.fill = solid(COLORS.label);
+    labelCell.alignment = { vertical: "top", wrapText: true };
+    labelCell.border = BOX;
+
     row.getCell(2).value = value;
-    row.getCell(2).alignment = { wrapText: true, vertical: "top" };
-}
-
-function addTitle(ws: ExcelJS.Worksheet, rowNumber: number, title: string) {
-    const cell = ws.getCell(rowNumber, 1);
-    cell.value = title;
-    cell.font = BOLD;
-}
-
-function addHeaderRow(ws: ExcelJS.Worksheet, rowNumber: number, headers: string[]) {
-    const row = ws.getRow(rowNumber);
-    headers.forEach((h, i) => {
-        row.getCell(i + 1).value = h;
-        row.getCell(i + 1).font = BOLD;
+    ws.mergeCells(rowNumber, 2, rowNumber, INFO_COLS);
+    styleCells(row, 2, INFO_COLS, cell => {
+        cell.font = font();
+        cell.alignment = { vertical: "top", wrapText: true };
+        cell.border = BOX;
     });
+    row.height = estimatedHeight(value, sumWidths(2, INFO_COLS));
 }
 
 /** Arbre du chemin de calcul : 1 ligne par étape, indentée et regroupée selon sa profondeur. */
@@ -101,23 +181,29 @@ function addDerivationTree(ws: ExcelJS.Worksheet, startRow: number, nodes: Deriv
     let rowNumber = startRow;
     const visit = (node: DerivationNode, depth: number) => {
         const row = ws.getRow(rowNumber);
+        const isRoot = depth === 0;
+
         const labelCell = row.getCell(1);
-        labelCell.value = depth === 0 ? node.label : `└ ${node.label}`;
-        labelCell.alignment = { indent: Math.min(depth * 2, 15), vertical: "top" };
-        if (depth === 0) labelCell.font = BOLD;
+        labelCell.value = isRoot ? node.label : `└ ${node.label}`;
+        labelCell.alignment = { indent: Math.min(depth * 2, 15), vertical: "top", wrapText: true };
 
         const valueCell = row.getCell(2);
         valueCell.value = node.formula
             ? toCellValue({ formula: node.formula, result: node.value })
             : (node.value ?? null);
-        valueCell.alignment = { horizontal: "left", vertical: "top" };
+        valueCell.alignment = { horizontal: "right", vertical: "top" };
         if (node.numFmt) valueCell.numFmt = node.numFmt;
-        if (depth === 0) valueCell.font = BOLD;
 
-        if (node.detail) {
-            row.getCell(3).value = node.detail;
-            row.getCell(3).alignment = { wrapText: true, vertical: "top" };
-        }
+        row.getCell(3).value = node.detail ?? null;
+        ws.mergeCells(rowNumber, 3, rowNumber, INFO_COLS);
+        row.getCell(3).alignment = { vertical: "top", wrapText: true };
+
+        styleCells(row, 1, INFO_COLS, cell => {
+            cell.font = font({ bold: isRoot });
+            cell.border = BOX;
+            if (isRoot) cell.fill = solid(COLORS.label);
+        });
+        if (node.detail) row.height = estimatedHeight(node.detail, sumWidths(3, INFO_COLS));
         row.outlineLevel = Math.min(depth, MAX_OUTLINE_LEVEL);
         rowNumber++;
         (node.children || []).forEach(child => visit(child, depth + 1));
@@ -127,53 +213,53 @@ function addDerivationTree(ws: ExcelJS.Worksheet, startRow: number, nodes: Deriv
 }
 
 function addInfoSheet(wb: ExcelJS.Workbook, exp: KpiExport, filtres: FiltreAffiche[]) {
-    const ws = wb.addWorksheet(INFO_SHEET_NAME);
-    [32, 45, 45, 55, 30, 45].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    const ws = wb.addWorksheet(INFO_SHEET_NAME, {
+        properties: { tabColor: { argb: COLORS.primary } },
+        views: [{ showGridLines: false }],
+    });
+    INFO_WIDTHS.forEach((w, i) => {
+        ws.getColumn(i + 1).width = w;
+        ws.getColumn(i + 1).font = font();
+    });
     // Parent au-dessus de ses enfants (lecture en arbre), pas en dessous comme par défaut.
     ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
 
     const d = exp.definition;
-    addTitle(ws, 1, "Informations");
+    addSheetTitle(ws, "Informations", `${d.titre} — onglet ${d.onglet}`);
 
-    let r = 3;
-    addTitle(ws, r++, "Filtres appliqués");
+    let r = 4;
+    addSectionTitle(ws, r++, "Filtres appliqués");
     filtres.forEach(f => addInfoLine(ws, r++, f.label, f.value));
 
     r++;
-    addTitle(ws, r++, "Indicateur");
-    addInfoLine(ws, r++, "Titre", d.titre);
-    addInfoLine(ws, r++, "Onglet du dashboard", d.onglet);
+    addSectionTitle(ws, r++, "Indicateur");
     if (d.description) addInfoLine(ws, r++, "Description", d.description);
     if (d.metier) addInfoLine(ws, r++, "Métier", d.metier);
     if (d.formule) addInfoLine(ws, r++, "Formule", d.formule);
     if (d.cible) addInfoLine(ws, r++, "Cible", d.cible);
     if (d.sourceOdoo) addInfoLine(ws, r++, "Source Odoo", d.sourceOdoo);
     addInfoLine(ws, r++, "Tables BDD", d.tables.join(", "));
-    if (d.commentaires?.length) addInfoLine(ws, r++, "Commentaires", d.commentaires.join("\n"));
-    if (exp.sheets.length) {
-        const liste = exp.sheets
-            .map(s => `${sanitizeSheetName(s.name)}${s.description ? ` : ${s.description}` : ""}`)
-            .join("\n");
-        addInfoLine(ws, r++, "Feuilles de données", liste);
-    }
 
     if (d.colonnes?.length) {
         r++;
-        addTitle(ws, r++, "Colonnes");
+        addSectionTitle(ws, r++, "Colonnes");
         addHeaderRow(ws, r++, ["Colonne", "Description", "Métier", "Formule", "Source Odoo", "Commentaires"]);
         d.colonnes.forEach(c => {
             const row = ws.getRow(r++);
             [c.nom, c.description, c.metier, c.formule, c.source, c.commentaire ?? ""].forEach((v, i) => {
-                row.getCell(i + 1).value = v;
-                row.getCell(i + 1).alignment = { wrapText: true, vertical: "top" };
+                const cell = row.getCell(i + 1);
+                cell.value = v;
+                cell.font = font({ bold: i === 0 });
+                cell.alignment = { vertical: "top", wrapText: true };
+                cell.border = BOX;
+                if (i === 0) cell.fill = solid(COLORS.label);
             });
-            row.getCell(1).font = BOLD;
         });
     }
 
     r++;
-    addTitle(ws, r++, "Données");
-    addHeaderRow(ws, r++, ["Étape", "Valeur", "Détail"]);
+    addSectionTitle(ws, r++, "Données");
+    addHeaderRow(ws, r++, ["Étape", "Valeur", "Détail"], [1, 1, INFO_COLS - 2]);
     addDerivationTree(ws, r, exp.derivation);
 }
 
@@ -183,14 +269,33 @@ function addDataSheet(wb: ExcelJS.Workbook, sheet: DataSheet) {
         header: c.header,
         key: c.key,
         width: c.width ?? Math.max(c.header.length + 4, 12),
-        style: c.numFmt ? { numFmt: c.numFmt } : {},
+        style: { font: font(), ...(c.numFmt ? { numFmt: c.numFmt } : {}) },
     }));
     sheet.rows.forEach(row => {
         const values: Record<string, ExcelJS.CellValue> = {};
         sheet.columns.forEach(c => { values[c.key] = toCellValue(row[c.key]); });
         ws.addRow(values);
     });
-    ws.getRow(1).font = BOLD;
+
+    const header = ws.getRow(1);
+    styleCells(header, 1, sheet.columns.length, cell => {
+        cell.fill = solid(COLORS.primary);
+        cell.font = font({ bold: true, color: { argb: COLORS.white } });
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        cell.border = BOX;
+    });
+    header.height = 30;
+    if (sheet.description) header.getCell(1).note = sheet.description;
+
+    if (sheet.lastRowIsTotal && sheet.rows.length) {
+        const total = ws.getRow(sheet.rows.length + 1);
+        styleCells(total, 1, sheet.columns.length, cell => {
+            cell.fill = solid(COLORS.total);
+            cell.font = font({ bold: true });
+            cell.border = { ...BOX, top: { style: "medium", color: { argb: COLORS.primary } } };
+        });
+    }
+
     ws.views = [{ state: "frozen", ySplit: 1 }];
     if (sheet.columns.length) {
         ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columns.length } };
