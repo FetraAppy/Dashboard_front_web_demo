@@ -101,6 +101,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   // très différent de la somme des "Total/Période" individuels (bug confirmé le 2026-09-21 :
   // -926h en vue globale vs +354h en sommant les fiches, pour janvier 2026 seul).
   variableHoursMonth: number[] = [];
+  /** Total du graphique "Heures non facturables cumulées" (Σ de toutes les catégories affichées). */
+  nonFactTotal = 0;
 
   // KPI aggregates
   kpiObjFact = 0;
@@ -326,6 +328,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     this.collabSuggestionsOpen = false;
     this.syncCollabSearchInput();
     this.onFilterChange();
+    // Retire le focus (et donc le curseur clignotant) du champ une fois la sélection faite —
+    // le (mousedown) preventDefault() sur les suggestions empêche le blur naturel du clic.
+    this.collabSearchInputRef?.nativeElement.blur();
   }
 
   /** Ferme la liste de suggestions un instant après avoir perdu le focus (délai pour laisser le
@@ -412,6 +417,20 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     const yearText = this.activeYear;
     const monthText = this.activeMonth === 'all' ? 'Toute l\'année' : MF[parseInt(this.activeMonth)];
     return [collabText, companyText, yearText, monthText].filter(Boolean).join(' · ');
+  }
+
+  /**
+   * Filtres actifs au format de l'API d'export (GET /api/operationnel/export/:kpiId) — à passer
+   * au bouton <app-export-button [params]="exportParams">. activeMonth est un index 0-11,
+   * l'API attend un mois 1-12.
+   */
+  get exportParams(): KpiExportParams {
+    return {
+      annee: this.activeYear,
+      mois: this.activeMonth === 'all' ? 'all' : String(parseInt(this.activeMonth, 10) + 1),
+      collab: this.activeCollab,
+      companies: this.activeCompanies,
+    };
   }
 
   mathRound(val: number): number {
@@ -786,13 +805,19 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
         // Cumul basé sur variableHoursMonth (calculé par personne puis sommé), pas sur
         // filteredRealHours[i]/theoHours[i] agrégés — voir commentaire sur variableHoursMonth.
+        // Calculé sur les 12 mois (pas .slice(0, months) avant d'indexer) — même bug que le
+        // graphique "Suivi de l'objectif mensuel" (corrigé le 2026-09-23) : en vue mois unique,
+        // cumVarAll n'aurait contenu que l'élément d'index 0 (janvier), et cumVarAll[activeMonthIndex]
+        // pour tout autre mois tombait hors limites → point manquant sur la courbe.
+        // Ne saute plus les mois à 0h réalisée (ex. mois futurs) : "tous les mois" doit montrer
+        // les 12 mois — la valeur ne change pas (variableHoursMonth y vaut déjà 0), seule la
+        // ligne continue maintenant à plat au lieu de s'arrêter avec un trou (2026-09-24).
         let runningVar = 0;
-        const cumVarAll = this.filteredRealHours.slice(0, months).map((r, i) => {
-          if (r === 0) return null;
+        const cumVarAll = this.filteredRealHours.map((r, i) => {
           runningVar += this.variableHoursMonth[i] || 0;
           return runningVar;
         });
-        const cumVarData = isAllMonths ? cumVarAll : [cumVarAll[activeMonthIndex]];
+        const cumVarData = isAllMonths ? cumVarAll.slice(0, months) : [cumVarAll[activeMonthIndex]];
 
         this.chartHeures = new Chart(ctx, {
           type: 'bar',
@@ -937,22 +962,37 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         const activeMonthIndex = isAllMonths ? -1 : parseInt(this.activeMonth);
         const months = isAllMonths ? 12 : 1;
 
-        // Un mois sans objectif CHF réel (caObjectifChf = 0, aucune donnée Odoo saisie pour ce
-        // périmètre dans l'onglet "Objectif") ne peut pas produire un "écart" valide — sinon tout
-        // le CA réalisé apparaît à tort comme un dépassement de 100%. On traite ces mois comme
-        // sans donnée (null) plutôt que de comparer à un objectif à zéro.
-        const ecartsAll = this.filteredCaReal.slice(0, months).map((v, i) =>
-          (v > 0 && this.caObjectifChf[i] > 0) ? v - this.caObjectifChf[i] : null);
+        // Un mois SANS OBJECTIF saisi (caObjectifChf = 0, aucune donnée Odoo dans l'onglet
+        // "Objectif") ne peut pas produire un "écart" valide — sinon le CA réalisé apparaît à
+        // tort comme un dépassement. Ces mois-là restent "sans donnée" (null, pas de barre).
+        // Mais un mois AVEC un objectif saisi doit toujours afficher sa barre, même sans réalisé
+        // (ex. Igor, octobre 2026 : 30'000 CHF d'objectif, 0 CHF réalisé car le mois n'a pas
+        // encore eu lieu → barre rouge -30'000, pas une barre manquante) — "tous les mois" doit
+        // montrer les 12 mois dès qu'une donnée existe, pas seulement jusqu'au mois courant,
+        // demande utilisateur du 2026-09-24.
+        // Calculé sur les 12 mois (pas .slice(0, months) avant d'indexer) : sinon, en vue mois
+        // unique (months=1), ecartsAll/cumCAAll ne contenaient que l'élément d'index 0 (janvier),
+        // et ecartsAll[activeMonthIndex] pour tout autre mois (ex. février, index 1) tombait hors
+        // limites → undefined → graphique vide, sauf pour janvier ou "tous les mois" — corrigé
+        // le 2026-09-23. cumCAAll doit aussi rester cumulé depuis janvier même pour un seul mois
+        // affiché (sinon le cumulé d'un mois isolé ne reflèterait que ce mois-là).
+        const ecartsAll = this.filteredCaReal.map((v, i) =>
+          this.caObjectifChf[i] > 0 ? v - this.caObjectifChf[i] : null);
+        // Cumul : ne saute JAMAIS un mois (contrairement à ecartsAll ci-dessus) — sinon la courbe
+        // divergeait de la carte RÉALISÉ (Σ CA réalisé − Σ Objectif sur l'année complète, sans
+        // exception), qui elle ne saute rien. Un mois avec du CA réalisé mais sans objectif saisi
+        // (ex. Igor, mars 2026 : 17'962.50 CHF de CA, 0 CHF d'objectif) disparaissait entièrement
+        // du cumul alors qu'il compte pleinement dans le total de la carte — écart de ~12k CHF
+        // constaté et corrigé le 2026-09-24.
         let runningCA = 0;
-        const cumCAAll = this.filteredCaReal.slice(0, months).map((v, i) => {
-          if (v === 0 || this.caObjectifChf[i] === 0) return null;
-          runningCA += v - this.caObjectifChf[i];
+        const cumCAAll = this.filteredCaReal.map((v, i) => {
+          runningCA += v - (this.caObjectifChf[i] || 0);
           return runningCA;
         });
 
         const labels = isAllMonths ? MS.slice(0, months) : [MS[activeMonthIndex]];
-        const ecartsData = isAllMonths ? ecartsAll : [ecartsAll[activeMonthIndex]];
-        const cumCAData = isAllMonths ? cumCAAll : [cumCAAll[activeMonthIndex]];
+        const ecartsData = isAllMonths ? ecartsAll.slice(0, months) : [ecartsAll[activeMonthIndex]];
+        const cumCAData = isAllMonths ? cumCAAll.slice(0, months) : [cumCAAll[activeMonthIndex]];
         const ecartBgColors = isAllMonths
           ? ecartsAll.map(v => v === null ? (this.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)') : v >= 0 ? (this.isDark ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.7)') : (this.isDark ? 'rgba(239, 68, 68, 0.35)' : 'rgba(239, 68, 68, 0.7)'))
           : [ecartsAll[activeMonthIndex] === null ? (this.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)') : ecartsAll[activeMonthIndex]! >= 0 ? (this.isDark ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.7)') : (this.isDark ? 'rgba(239, 68, 68, 0.35)' : 'rgba(239, 68, 68, 0.7)')];
@@ -1043,7 +1083,14 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
     if (this.chNonFactCanvas) {
       const ctx = this.chNonFactCanvas.nativeElement.getContext('2d');
       if (ctx) {
-        let nf = { admin: 0, vacances: 0, rh_it: 0, marketing: 0, formation: 0, maladie: 0 };
+        // Catégories 100% dynamiques (2026-09-30, demande utilisateur) : plus de liste figée —
+        // chaque clé de non_fact vient du backend (nom réel du type de congé Odoo ou de la
+        // tâche, voir operationnel.controller.ts). Une nouvelle catégorie ajoutée dans Odoo
+        // apparaît donc ici automatiquement, sans changement de code. Plus besoin non plus du
+        // cas spécial "Vacances" (source hr_leave) : maintenant que la catégorisation des
+        // congés se base sur holiday_id → hr_leave_type (corrigé le 2026-09-30), la catégorie
+        // "Paid Time Off" calculée ici correspond déjà exactement au total hr_leave.
+        const nf: Record<string, number> = {};
 
         // Mois retenus : un seul mois sélectionné, ou l'année complète janvier-décembre —
         // même logique que les autres graphiques/tableaux (voir calculateData()).
@@ -1061,26 +1108,27 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         collabNames.forEach(name => {
           const c = this.collabData[name];
           if (c?.non_fact) {
-            Object.keys(nf).forEach(k => {
-              const key = k as keyof typeof nf;
-              if (key === 'vacances') return; // voir ci-dessous — source hr_leave, pas account_analytic_line
-              const arr: number[] = c.non_fact[key] || [];
-              monthIndices.forEach(i => { nf[key] += arr[i] || 0; });
+            Object.keys(c.non_fact).forEach(category => {
+              const arr: number[] = c.non_fact[category] || [];
+              const sum = monthIndices.reduce((s, i) => s + (arr[i] || 0), 0);
+              nf[category] = (nf[category] || 0) + sum;
             });
           }
         });
-        // Vacances : mêmes chiffres que "Suivi heure variable & Vacances" (this.vacationsMonth,
-        // issu de hr_leave/holiday_status_id=1, congé RH validé, réparti jour ouvré par jour
-        // ouvré) — décision utilisateur du 2026-09-22 : priorité à la cohérence avec ce tableau,
-        // quitte à ce que Σ catégories de CE graphique ne corresponde plus exactement à
-        // H.réalisées − H.Productivité (56h en feuille de temps vs 136h en congé validé pour
-        // Igor, ex. concret — les deux ne mesurent pas la même chose, voir explication donnée
-        // en chat).
-        nf.vacances = monthIndices.reduce((s, i) => s + (this.vacationsMonth[i] || 0), 0);
 
-        const labels = ['Administratif', 'Vacances', 'RH / IT', 'Marketing', 'Formation', 'Maladie'];
-        const values = [nf.admin, nf.vacances, nf.rh_it, nf.marketing, nf.formation, nf.maladie];
-        const colors = ['#f97316', '#94a3b8', '#14b8a6', '#d946ef', '#3b82f6', '#ef4444'];
+        // Ne garde que les catégories avec des heures réellement présentes (0h = pas affiché,
+        // demande utilisateur), triées par volume décroissant pour la lisibilité.
+        const entries = Object.entries(nf)
+          .filter(([, hours]) => hours > 0)
+          .sort((a, b) => b[1] - a[1]);
+
+        const labels = entries.map(([category]) => category);
+        const values = entries.map(([, hours]) => hours);
+        this.nonFactTotal = values.reduce((s, v) => s + v, 0);
+        // Palette cyclique (pas une couleur par catégorie figée en dur, puisque le nombre de
+        // catégories est désormais variable).
+        const palette = ['#f97316', '#94a3b8', '#14b8a6', '#d946ef', '#3b82f6', '#ef4444', '#eab308', '#22c55e', '#0ea5e9', '#a855f7'];
+        const colors = labels.map((_, i) => palette[i % palette.length]);
 
         this.chartNonFact = new Chart(ctx, {
           type: 'bar',
