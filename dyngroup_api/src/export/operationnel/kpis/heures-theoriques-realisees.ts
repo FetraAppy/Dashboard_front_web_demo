@@ -13,14 +13,14 @@ import { DataSheet, FormulaCell, KpiExport } from "../../excel/kpi-export.types"
 import { cellRef, columnRange } from "../../excel/workbook-builder";
 import { EmployeeScope, MOIS, OperationnelExportFilters } from "../export-filters";
 
-// Export du "Tableau de suivi mensuel détaillé" (onglet Suivi Mensuel & Détails).
-// Chaîne de calcul, uniquement par formules Excel :
+// Export du graphique "Heures théoriques vs Heures réalisées" (onglet Indicateurs Clés), avec les
+// données Odoo brutes qui le nourrissent. Chaîne de calcul, uniquement par formules Excel :
 //   Timesheets + Segments de contrat (← Contrats, Collaborateurs, Jours fériés)
-//     → Par collaborateur → Tableau → arbre de la feuille Informations.
+//     → Par collaborateur → Graphique → arbre de la feuille Informations.
 // Les requêtes reprennent exactement les conditions du dashboard (operationnel.controller.ts), et
 // le théorique vient du même calcul partagé (services/theo-hours.ts).
 
-/** Même exclusion que "H. réalisées"/"H. Productivité" du dashboard : jours fériés fictifs Odoo. */
+/** Même exclusion que "H. réalisées" du dashboard : jours fériés fictifs générés par Odoo. */
 const EXCLUSION_FERIES_FICTIFS = "NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)";
 
 const NUM = "0.00";
@@ -41,9 +41,9 @@ function odooDay(value: unknown): Date | null {
     return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
 }
 
-interface Mesures { theo: number; ref100: number; real: number; prod: number }
+interface Mesures { theo: number; real: number; variable: number }
 
-export async function exportSuiviMensuelDetaille(
+export async function exportHeuresTheoriquesRealisees(
     filters: OperationnelExportFilters,
     scope: EmployeeScope
 ): Promise<KpiExport> {
@@ -64,10 +64,9 @@ export async function exportSuiviMensuelDetaille(
         ),
         pool.query(
             `SELECT TO_CHAR(aal.date::date, 'YYYY-MM-DD') AS date, aal.employee_id, aal.name AS libelle,
-                    aal.unit_amount AS heures, aal.productivity, pp.name AS projet, pt.name AS tache
+                    aal.unit_amount AS heures, pp.name AS projet
              FROM staging.account_analytic_line aal
              LEFT JOIN staging.project_project pp ON pp.id = aal.project_id
-             LEFT JOIN staging.project_task pt ON pt.id = aal.task_id
              WHERE aal.employee_id = ANY($1::int[])
                AND aal.date IS NOT NULL
                AND aal.date::date BETWEEN $2::date AND $3::date
@@ -102,22 +101,20 @@ export async function exportSuiviMensuelDetaille(
     // Mesures par collaborateur × mois, calculées ici pour servir de résultat affiché aux formules.
     const mesures = new Map<string, Mesures>();
     const keyOf = (empId: number, mois: number) => `${empId}|${mois}`;
-    scope.employees.forEach(e => months.forEach(m => mesures.set(keyOf(e.id, m), { theo: 0, ref100: 0, real: 0, prod: 0 })));
+    scope.employees.forEach(e => months.forEach(m => mesures.set(keyOf(e.id, m), { theo: 0, real: 0, variable: 0 })));
 
-    // --- Feuille Timesheets -------------------------------------------------------------------
+    // --- Feuille Timesheets (Odoo : account.analytic.line) -------------------------------------
     const timesheets: DataSheet = {
         name: "Timesheets",
-        description: "Lignes de feuille de temps comptées dans H. réalisées (la colonne Productivité détermine H. Productivité)",
+        description: "Lignes de feuille de temps Odoo comptées dans H. réalisées",
         columns: [
             { header: "Date", key: "date", width: 12, numFmt: DATE },
             { header: "Mois", key: "mois", width: 7 },
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Société", key: "societe", width: 24 },
             { header: "Projet", key: "projet", width: 34 },
-            { header: "Tâche", key: "tache", width: 34 },
             { header: "Libellé", key: "libelle", width: 50 },
             { header: "Heures", key: "heures", width: 9, numFmt: NUM },
-            { header: "Productivité", key: "productivite", width: 13 },
         ],
         rows: [],
     };
@@ -126,29 +123,23 @@ export async function exportSuiviMensuelDetaille(
         if (!emp) return;
         const [y, mo, d] = r.date.split("-").map(Number);
         const heures = parseFloat(r.heures) || 0;
-        const productive = r.productivity === true;
         const m = mesures.get(keyOf(emp.id, mo));
-        if (m) {
-            m.real += heures;
-            if (productive) m.prod += heures;
-        }
+        if (m) m.real += heures;
         timesheets.rows.push({
             date: new Date(Date.UTC(y, mo - 1, d)),
             mois: mo,
             collab: emp.name,
             societe: emp.company ?? "",
             projet: r.projet ?? "",
-            tache: r.tache ?? "",
             libelle: r.libelle ?? "",
             heures,
-            productivite: productive ? "Oui" : "Non",
         });
     });
 
     // --- Feuille Contrats (Odoo : hr.contract + resource.calendar) ------------------------------
     const contrats: DataSheet = {
         name: "Contrats",
-        description: "Contrats Odoo (open et close) du périmètre, avec leur horaire de travail",
+        description: "Contrats Odoo (états open et close) des collaborateurs du périmètre, avec leur horaire de travail",
         columns: [
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Contrat", key: "contrat", width: 28 },
@@ -174,10 +165,10 @@ export async function exportSuiviMensuelDetaille(
         });
     });
 
-    // --- Feuille Collaborateurs (Odoo : hr.employee) -------------------------------------------
+    // --- Feuilles Collaborateurs (Odoo : hr.employee) et Segments de contrat --------------------
     const collaborateurs: DataSheet = {
         name: "Collaborateurs",
-        description: "Fiche employé Odoo : société, lieu de travail (→ canton des jours fériés), base du théorique",
+        description: "Fiche employé Odoo : société, lieu de travail (→ canton des jours fériés) et base du théorique",
         columns: [
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Société", key: "societe", width: 24 },
@@ -191,11 +182,9 @@ export async function exportSuiviMensuelDetaille(
         ],
         rows: [],
     };
-
-    // --- Feuille Segments de contrat (théorique et référence 100% de l'ETP) -------------------
     const segmentsSheet: DataSheet = {
         name: "Segments de contrat",
-        description: "Théorique par collaborateur, mois et période de contrat (mois coupé si le contrat change en cours de mois)",
+        description: "Théorique par collaborateur, mois et période de contrat (un mois est coupé si le contrat change en cours de mois)",
         columns: [
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Canton", key: "canton", width: 8 },
@@ -208,12 +197,11 @@ export async function exportSuiviMensuelDetaille(
             { header: "Jours fériés déduits", key: "feries", width: 19 },
             { header: "Dates fériées", key: "feries_dates", width: 26 },
             { header: "H. théoriques", key: "theo", width: 14, numFmt: NUM },
-            { header: "Référence 100%", key: "ref100", width: 15, numFmt: NUM },
         ],
         rows: [],
     };
     const cantonsUtilises = new Set<Canton>();
-    const unrounded = new Map<string, { theo: number; ref100: number }>();
+    const unrounded = new Map<string, number>();
     scope.employees.forEach(emp => {
         const canton: Canton = cantonMap[emp.id] || "VD";
         cantonsUtilises.add(canton);
@@ -240,11 +228,7 @@ export async function exportSuiviMensuelDetaille(
             .filter(s => monthSet.has(s.month + 1))
             .forEach(s => {
                 const i = segmentsSheet.rows.length;
-                const ref100 = (s.workingDays - s.holidays.length) * 8;
-                const acc = unrounded.get(keyOf(emp.id, s.month + 1)) ?? { theo: 0, ref100: 0 };
-                acc.theo += s.hours;
-                acc.ref100 += ref100;
-                unrounded.set(keyOf(emp.id, s.month + 1), acc);
+                unrounded.set(keyOf(emp.id, s.month + 1), (unrounded.get(keyOf(emp.id, s.month + 1)) ?? 0) + s.hours);
                 const joursRef = `(${cellRef(segmentsSheet, "jours_ouvres", i)}-${cellRef(segmentsSheet, "feries", i)})`;
                 segmentsSheet.rows.push({
                     collab: emp.name,
@@ -258,17 +242,18 @@ export async function exportSuiviMensuelDetaille(
                     feries: s.holidays.length,
                     feries_dates: s.holidays.map(frDate).join(", "),
                     theo: fx(`${joursRef}*${cellRef(segmentsSheet, "hpj", i)}`, s.hours),
-                    ref100: fx(`${joursRef}*8`, ref100),
                 });
             });
     });
     // Arrondi à 2 décimales par collaborateur et par mois, comme le dashboard.
     unrounded.forEach((v, k) => {
         const m = mesures.get(k);
-        if (m) { m.theo = round2(v.theo); m.ref100 = round2(v.ref100); }
+        if (m) m.theo = round2(v);
     });
+    // Heure variable PAR PERSONNE : réalisé − théorique seulement si son réalisé du mois est > 0.
+    mesures.forEach(m => { m.variable = m.real > 0 ? m.real - m.theo : 0; });
 
-    // --- Feuille Jours fériés -----------------------------------------------------------------
+    // --- Feuille Jours fériés (Odoo : resource.calendar.leaves) ---------------------------------
     const feriesSheet: DataSheet = {
         name: "Jours fériés",
         description: "Jours fériés de la période par canton ; seuls les jours ouvrés sont déduits du théorique",
@@ -307,124 +292,103 @@ export async function exportSuiviMensuelDetaille(
             { header: "Mois", key: "mois", width: 7 },
             { header: "Nom du mois", key: "mois_nom", width: 12 },
             { header: "H. théoriques", key: "theo", width: 14, numFmt: NUM },
-            { header: "Référence 100%", key: "ref100", width: 15, numFmt: NUM },
             { header: "H. réalisées", key: "real", width: 13, numFmt: NUM },
-            { header: "H. Productivité", key: "prod", width: 15, numFmt: NUM },
-            { header: "ETP", key: "etp", width: 7, numFmt: NUM },
+            { header: "Heure variable", key: "variable", width: 15, numFmt: NUM },
         ],
         rows: [],
     };
-    const segSum = (key: string, i: number) =>
-        `SUMIFS(${columnRange(segmentsSheet, key)},${columnRange(segmentsSheet, "collab")},${cellRef(parCollab, "collab", i)},${columnRange(segmentsSheet, "mois")},${cellRef(parCollab, "mois", i)})`;
-    const tsSum = (i: number, extra = "") =>
-        `SUMIFS(${columnRange(timesheets, "heures")},${columnRange(timesheets, "collab")},${cellRef(parCollab, "collab", i)},${columnRange(timesheets, "mois")},${cellRef(parCollab, "mois", i)}${extra})`;
+    const segSum = (i: number) =>
+        `SUMIFS(${columnRange(segmentsSheet, "theo")},${columnRange(segmentsSheet, "collab")},${cellRef(parCollab, "collab", i)},${columnRange(segmentsSheet, "mois")},${cellRef(parCollab, "mois", i)})`;
+    const tsSum = (i: number) =>
+        `SUMIFS(${columnRange(timesheets, "heures")},${columnRange(timesheets, "collab")},${cellRef(parCollab, "collab", i)},${columnRange(timesheets, "mois")},${cellRef(parCollab, "mois", i)})`;
     [...scope.employees].sort((a, b) => a.name.localeCompare(b.name)).forEach(emp => {
         months.forEach(mois => {
             const i = parCollab.rows.length;
             const m = mesures.get(keyOf(emp.id, mois))!;
-            const etp = m.ref100 > 0 ? Math.min(1, round2(m.theo / m.ref100)) : 0;
             const theoC = cellRef(parCollab, "theo", i);
-            const refC = cellRef(parCollab, "ref100", i);
+            const realC = cellRef(parCollab, "real", i);
             parCollab.rows.push({
                 collab: emp.name,
                 mois,
                 mois_nom: MOIS[mois - 1],
-                theo: fx(`ROUND(${segSum("theo", i)},2)`, m.theo),
-                ref100: fx(`ROUND(${segSum("ref100", i)},2)`, m.ref100),
+                theo: fx(`ROUND(${segSum(i)},2)`, m.theo),
                 real: fx(tsSum(i), m.real),
-                prod: fx(tsSum(i, `,${columnRange(timesheets, "productivite")},"Oui"`), m.prod),
-                etp: fx(`IF(${refC}>0,MIN(1,ROUND(${theoC}/${refC},2)),0)`, etp),
+                variable: fx(`IF(${realC}>0,${realC}-${theoC},0)`, m.variable),
             });
         });
     });
 
-    // --- Feuille Tableau (réplique du tableau du dashboard) -------------------------------------
-    const tableau: DataSheet = {
-        name: "Tableau",
-        description: "Réplique du Tableau de suivi mensuel détaillé du dashboard (une ligne par mois + Total ou Moy.)",
+    // --- Feuille Graphique (les données du graphique du dashboard) ------------------------------
+    const graphique: DataSheet = {
+        name: "Graphique",
+        description: "Données du graphique « Heures théoriques vs Heures réalisées » (une ligne par mois + Total)",
         columns: [
             { header: "N° mois", key: "mois", width: 9 },
             { header: "Mois", key: "mois_nom", width: 16 },
             { header: "H. théoriques", key: "theo", width: 14, numFmt: NUM },
             { header: "H. réalisées", key: "real", width: 13, numFmt: NUM },
-            { header: "Taux effort (%)", key: "taux_effort", width: 15, numFmt: NUM },
-            { header: "H. Productivité", key: "prod", width: 15, numFmt: NUM },
-            { header: "Taux Productivité (%)", key: "taux_prod", width: 21, numFmt: NUM },
-            { header: "ETP", key: "etp", width: 7, numFmt: NUM },
+            { header: "Heure variable", key: "variable", width: 15, numFmt: NUM },
+            { header: "Cumul variable", key: "cumul", width: 15, numFmt: NUM },
         ],
         rows: [],
         lastRowIsTotal: true,
     };
     const pcSum = (key: string, i: number) =>
-        `SUMIFS(${columnRange(parCollab, key)},${columnRange(parCollab, "mois")},${cellRef(tableau, "mois", i)})`;
-    const ref = (key: string, i: number) => cellRef(tableau, key, i);
-    const totals = { theo: 0, real: 0, prod: 0, etp: 0 };
+        `SUMIFS(${columnRange(parCollab, key)},${columnRange(parCollab, "mois")},${cellRef(graphique, "mois", i)})`;
+    const ref = (key: string, i: number) => cellRef(graphique, key, i);
+    const totals = { theo: 0, real: 0, variable: 0 };
     months.forEach(mois => {
-        const i = tableau.rows.length;
-        const agg = { theo: 0, ref100: 0, real: 0, prod: 0 };
+        const i = graphique.rows.length;
+        const agg = { theo: 0, real: 0, variable: 0 };
         scope.employees.forEach(e => {
             const m = mesures.get(keyOf(e.id, mois))!;
-            agg.theo += m.theo; agg.ref100 += m.ref100; agg.real += m.real; agg.prod += m.prod;
+            agg.theo += m.theo; agg.real += m.real; agg.variable += m.variable;
         });
-        const etp = agg.ref100 > 0 ? Math.min(1, round2(agg.theo / agg.ref100)) : 0;
-        totals.theo += agg.theo; totals.real += agg.real; totals.prod += agg.prod; totals.etp += etp;
-        tableau.rows.push({
+        totals.theo += agg.theo; totals.real += agg.real; totals.variable += agg.variable;
+        // Comme le dashboard : pas de point de cumul pour un mois sans aucune heure réalisée.
+        graphique.rows.push({
             mois,
             mois_nom: MOIS[mois - 1],
             theo: fx(pcSum("theo", i), agg.theo),
             real: fx(pcSum("real", i), agg.real),
-            taux_effort: fx(
-                `IF(AND(${ref("real", i)}>0,${ref("theo", i)}>0),${ref("real", i)}/${ref("theo", i)}*100,"—")`,
-                agg.real > 0 && agg.theo > 0 ? (agg.real / agg.theo) * 100 : "—"
-            ),
-            prod: fx(pcSum("prod", i), agg.prod),
-            taux_prod: fx(
-                `IF(${ref("real", i)}>0,${ref("prod", i)}/${ref("real", i)}*100,"—")`,
-                agg.real > 0 ? (agg.prod / agg.real) * 100 : "—"
-            ),
-            etp: fx(
-                `IF(${pcSum("ref100", i)}>0,MIN(1,ROUND(${pcSum("theo", i)}/${pcSum("ref100", i)},2)),0)`,
-                etp
+            variable: fx(pcSum("variable", i), agg.variable),
+            cumul: fx(
+                `IF(${ref("real", i)}>0,SUM(${ref("variable", 0)}:${ref("variable", i)}),"—")`,
+                agg.real > 0 ? totals.variable : "—"
             ),
         });
     });
-    const t = tableau.rows.length; // index de la ligne Total
+    const t = graphique.rows.length; // index de la ligne Total
     const sumCol = (key: string) => `SUM(${ref(key, 0)}:${ref(key, t - 1)})`;
-    const tauxEffortTotal = totals.real > 0 && totals.theo > 0 ? (totals.real / totals.theo) * 100 : "—";
-    const tauxProdTotal = totals.real > 0 ? (totals.prod / totals.real) * 100 : "—";
-    tableau.rows.push({
+    graphique.rows.push({
         mois: null,
-        mois_nom: "Total ou Moy.",
+        mois_nom: "Total",
         theo: fx(sumCol("theo"), totals.theo),
         real: fx(sumCol("real"), totals.real),
-        taux_effort: fx(`IF(AND(${ref("real", t)}>0,${ref("theo", t)}>0),${ref("real", t)}/${ref("theo", t)}*100,"—")`, tauxEffortTotal),
-        prod: fx(sumCol("prod"), totals.prod),
-        taux_prod: fx(`IF(${ref("real", t)}>0,${ref("prod", t)}/${ref("real", t)}*100,"—")`, tauxProdTotal),
-        etp: fx(sumCol("etp"), totals.etp),
+        variable: fx(sumCol("variable"), totals.variable),
+        cumul: null,
     });
 
-    // --- Chemin de calcul (une racine par colonne, valeur = ligne Total du Tableau) -------------
-    const total = (key: string) => cellRef(tableau, key, t, true);
+    // --- Chemin de calcul (une racine par mesure, valeur = ligne Total du Graphique) ------------
+    const total = (key: string) => cellRef(graphique, key, t, true);
     const nbCollab = scope.employees.length;
-    const nbLignes = timesheets.rows.length;
-    const nbProductives = timesheets.rows.filter(r => r.productivite === "Oui").length;
     const sourcesFeries = [...cantonsUtilises].sort()
         .map(c => `${c} : ${holidaysByCanton[c].source === "odoo" ? "calendrier Odoo" : "formule (Vaud)"}`)
         .join(" · ");
     const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""}, du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`;
     const exclusion = "Hors lignes « Congé (…) » à 0 CHF (jours fériés fictifs Odoo)";
-    const sommeHeures = "Σ par collaborateur et mois (Par collaborateur) → Σ par mois (Tableau) → Σ des mois";
 
     return {
         definition: {
-            id: "suivi-mensuel-detaille",
-            titre: "Tableau de suivi mensuel détaillé",
-            onglet: "Suivi Mensuel & Détails",
-            description: "Heures théoriques, réalisées et productives, taux d'effort et de productivité, et ETP, par mois",
+            id: "heures-theoriques-realisees",
+            titre: "Heures théoriques vs Heures réalisées",
+            onglet: "Indicateurs Clés",
+            description: "Barres mensuelles (théorique vs réalisé) + ligne de cumul variable",
+            metier: "Suivi de la charge de travail par rapport au contrat",
             tables: [
-                "staging.account_analytic_line", "staging.project_project", "staging.project_task",
-                "staging.hr_employee", "staging.hr_contract", "staging.resource_calendar",
-                "staging.resource_calendar_leaves", "staging.res_company", "kpi.operationnel_suivi_mensuel",
+                "staging.account_analytic_line", "staging.project_project", "staging.hr_employee",
+                "staging.hr_contract", "staging.resource_calendar", "staging.resource_calendar_leaves",
+                "staging.res_company", "kpi.operationnel_suivi_mensuel",
             ],
             colonnes: [
                 {
@@ -444,36 +408,20 @@ export async function exportSuiviMensuelDetaille(
                     commentaire: exclusion,
                 },
                 {
-                    nom: "Taux effort",
-                    description: "% du contrat effectivement travaillé",
-                    metier: "Sur- ou sous-régime par rapport au contrat",
-                    formule: "H. réalisées ÷ H. théoriques × 100",
+                    nom: "Heure variable",
+                    description: "Écart réalisé − théorique du mois",
+                    metier: "Heures sup. (+) ou déficit (−)",
+                    formule: "Σ collaborateurs (H. réalisées − H. théoriques), si H. réalisées > 0",
                     source: "Calculé",
-                    commentaire: "≥ 95% vert · 85–95% orange · < 85% rouge",
+                    commentaire: "Un collaborateur sans heure réalisée ce mois-là compte 0",
                 },
                 {
-                    nom: "H. Productivité",
-                    description: "Heures marquées « productives »",
-                    metier: "Volume de travail à valeur ajoutée",
-                    formule: "Σ heures de timesheet avec Productivité = Oui",
-                    source: "Timesheets",
-                    commentaire: exclusion,
-                },
-                {
-                    nom: "Taux Productivité",
-                    description: "% du réalisé qui est productif",
-                    metier: "Efficacité individuelle",
-                    formule: "H. Productivité ÷ H. réalisées × 100",
+                    nom: "Cumul variable",
+                    description: "Solde progressif des heures variables",
+                    metier: "Banque d'heures accumulée",
+                    formule: "Σ des heures variables depuis le 1er mois exporté",
                     source: "Calculé",
-                    commentaire: "≥ 100% vert · 80–99% orange · < 80% rouge",
-                },
-                {
-                    nom: "ETP",
-                    description: "Équivalent temps plein contractuel",
-                    metier: "Part du temps plein pour laquelle la personne est engagée",
-                    formule: "min(1, H. théoriques ÷ H. théoriques à 8h/jour)",
-                    source: "Calculé (contrats)",
-                    commentaire: "Total : somme des ETP mensuels",
+                    commentaire: "Pas de point pour un mois sans heure réalisée",
                 },
             ],
         },
@@ -485,50 +433,25 @@ export async function exportSuiviMensuelDetaille(
                     { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats), repli fiche employé sans contrat (Collaborateurs)` },
                     { label: "Jours fériés", detail: `${feriesSheet.rows.length} jours (Jours fériés) — ${sourcesFeries}` },
                     { label: "Par segment", detail: `(j. ouvrés − j. fériés) × h/jour → ${segmentsSheet.rows.length} segments (Segments de contrat)` },
-                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi 0.01 → Σ par mois (Tableau) → Σ des mois" },
+                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi 0.01 → Σ par mois (Graphique) → Σ des mois" },
                 ],
             },
             {
                 label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM,
                 children: [
-                    { label: "Source", detail: `${nbLignes} lignes de timesheet (Timesheets)` },
+                    { label: "Source", detail: `${timesheets.rows.length} lignes de timesheet (Timesheets)` },
                     { label: "Exclusion", detail: exclusion },
-                    { label: "Agrégation", detail: sommeHeures },
+                    { label: "Agrégation", detail: "Σ par collaborateur et mois (Par collaborateur) → Σ par mois (Graphique) → Σ des mois" },
                 ],
             },
             {
-                label: "Taux effort (%)", formula: total("taux_effort"), value: tauxEffortTotal, numFmt: NUM,
+                label: "Heure variable (solde de la période)", formula: total("variable"), value: totals.variable, numFmt: NUM,
                 children: [
-                    { label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM },
-                    { label: "H. théoriques", formula: total("theo"), value: totals.theo, numFmt: NUM },
-                    { label: "Formule", detail: "H. réalisées ÷ H. théoriques × 100 (Total : rapport des totaux)" },
-                ],
-            },
-            {
-                label: "H. Productivité", formula: total("prod"), value: totals.prod, numFmt: NUM,
-                children: [
-                    { label: "Source", detail: `${nbProductives} lignes avec Productivité = Oui (Timesheets)` },
-                    { label: "Exclusion", detail: exclusion },
-                    { label: "Agrégation", detail: sommeHeures },
-                ],
-            },
-            {
-                label: "Taux Productivité (%)", formula: total("taux_prod"), value: tauxProdTotal, numFmt: NUM,
-                children: [
-                    { label: "H. Productivité", formula: total("prod"), value: totals.prod, numFmt: NUM },
-                    { label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM },
-                    { label: "Formule", detail: "H. Productivité ÷ H. réalisées × 100 (Total : rapport des totaux)" },
-                ],
-            },
-            {
-                label: "ETP", formula: total("etp"), value: round2(totals.etp), numFmt: NUM,
-                children: [
-                    { label: "Par mois", detail: "min(1, Σ H. théoriques ÷ Σ Référence 100%), arrondi 0.01 (Tableau)" },
-                    { label: "Référence 100%", detail: "Mêmes segments de contrat à 8h/jour (Segments de contrat)" },
-                    { label: "Total", detail: "Somme des ETP mensuels (pas une moyenne)" },
+                    { label: "Par collaborateur", detail: "H. réalisées − H. théoriques si H. réalisées > 0, sinon 0 (Par collaborateur)" },
+                    { label: "Agrégation", detail: "Σ par mois (Graphique) → Σ des mois ; Cumul variable = somme progressive" },
                 ],
             },
         ],
-        sheets: [tableau, parCollab, timesheets, contrats, collaborateurs, segmentsSheet, feriesSheet],
+        sheets: [graphique, parCollab, timesheets, contrats, collaborateurs, segmentsSheet, feriesSheet],
     };
 }

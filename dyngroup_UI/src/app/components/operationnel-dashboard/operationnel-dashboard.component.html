@@ -191,7 +191,10 @@
          l'ancien wrapper .card-grid-2-1 (grille 2fr/1fr) laissait un vide à droite avec un seul
          enfant visible. Remettre le grid-2-1 en même temps que "Répartition annuelle". -->
     <div class="card" style="margin-bottom: 24px;">
-      <div class="chart-title">Heures théoriques vs Heures réalisées</div>
+      <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+        <span>Heures théoriques vs Heures réalisées</span>
+        <app-export-button kpiId="heures-theoriques-realisees" [params]="exportParams"></app-export-button>
+      </div>
       <div class="chart-subtitle">Volume mensuel + solde cumulatif progressif des heures variables</div>
       <div class="chart-container" style="height: 290px;">
         <canvas #chHeuresCanvas></canvas>
