@@ -2,6 +2,7 @@ import { KpiExport } from "../excel/kpi-export.types";
 import { EmployeeScope, OperationnelExportFilters } from "./export-filters";
 import { exportHeuresTheoriquesRealisees } from "./kpis/heures-theoriques-realisees";
 import { exportSuiviMensuelDetaille } from "./kpis/suivi-mensuel-detaille";
+import { exportSuiviObjectifMensuel } from "./kpis/suivi-objectif-mensuel";
 
 /**
  * Un exporteur par KPI du dashboard Opérationnel, chacun dans son propre fichier sous
@@ -17,4 +18,5 @@ export type OperationnelKpiExporter = (
 export const OPERATIONNEL_KPI_EXPORTERS: Record<string, OperationnelKpiExporter> = {
     "suivi-mensuel-detaille": exportSuiviMensuelDetaille,
     "heures-theoriques-realisees": exportHeuresTheoriquesRealisees,
+    "suivi-objectif-mensuel": exportSuiviObjectifMensuel,
 };
