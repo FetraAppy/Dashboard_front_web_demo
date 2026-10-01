@@ -331,6 +331,7 @@ export async function exportHeuresTheoriquesRealisees(
             { header: "Cumul variable", key: "cumul", width: 15, numFmt: NUM },
         ],
         rows: [],
+        lastRowIsTotal: true,
     };
     const pcSum = (key: string, i: number) =>
         `SUMIFS(${columnRange(parCollab, key)},${columnRange(parCollab, "mois")},${cellRef(graphique, "mois", i)})`;
@@ -371,66 +372,83 @@ export async function exportHeuresTheoriquesRealisees(
     // --- Chemin de calcul (une racine par mesure, valeur = ligne Total du Graphique) ------------
     const total = (key: string) => cellRef(graphique, key, t, true);
     const nbCollab = scope.employees.length;
-    const periode = `du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`;
     const sourcesFeries = [...cantonsUtilises].sort()
         .map(c => `${c} : ${holidaysByCanton[c].source === "odoo" ? "calendrier Odoo" : "formule (Vaud)"}`)
         .join(" · ");
-    const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""} · période ${periode}`;
+    const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""}, du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`;
+    const exclusion = "Hors lignes « Congé (…) » à 0 CHF (jours fériés fictifs Odoo)";
 
     return {
         definition: {
             id: "heures-theoriques-realisees",
             titre: "Heures théoriques vs Heures réalisées",
             onglet: "Indicateurs Clés",
-            description: "Volume mensuel d'heures dues (théoriques) et d'heures saisies (réalisées), avec le solde cumulatif des heures variables",
-            metier: "Compare la charge contractuelle attendue à l'activité réelle ; le cumul positif représente des heures excédentaires banquées",
-            formule: "H. théoriques = Σ segments (jours ouvrés lun–ven − jours fériés du canton) × heures/jour du contrat ; "
-                + "H. réalisées = Σ heures de timesheet ; "
-                + "Heure variable = Σ par collaborateur de (H. réalisées − H. théoriques) si ses H. réalisées du mois > 0 ; "
-                + "Cumul variable = somme progressive des heures variables",
-            sourceOdoo: "Feuilles de temps (account.analytic.line), contrats (hr.contract), horaires (resource.calendar), "
-                + "employés (hr.employee), jours fériés (resource.calendar.leaves)",
+            description: "Barres mensuelles (théorique vs réalisé) + ligne de cumul variable",
+            metier: "Suivi de la charge de travail par rapport au contrat",
             tables: [
                 "staging.account_analytic_line", "staging.project_project", "staging.hr_employee",
                 "staging.hr_contract", "staging.resource_calendar", "staging.resource_calendar_leaves",
                 "staging.res_company", "kpi.operationnel_suivi_mensuel",
             ],
-            commentaires: [
-                "Les lignes « Congé (…) » à 0 CHF (jours fériés fictifs générés par Odoo) sont exclues des heures réalisées.",
-                "« Tous les mois » couvre l'année complète, mois futurs inclus (le théorique est calculé d'après les contrats).",
-                "L'heure variable est calculée par personne : un collaborateur sans heure réalisée ce mois-là ne contribue pas au solde.",
-                "Le cumul variable est une somme progressive sur la période exportée ; il n'a pas de valeur pour un mois sans aucune heure réalisée.",
+            colonnes: [
+                {
+                    nom: "H. théoriques",
+                    description: "Heures dues selon le contrat",
+                    metier: "Charge de travail contractuelle attendue",
+                    formule: "(j. ouvrés − j. fériés du canton) × h/jour du contrat, par sous-période de contrat",
+                    source: "Contrats + jours fériés",
+                    commentaire: "Année complète, mois futurs inclus",
+                },
+                {
+                    nom: "H. réalisées",
+                    description: "Heures saisies en feuille de temps",
+                    metier: "Présence / activité réelle",
+                    formule: "Σ heures de timesheet",
+                    source: "Timesheets",
+                    commentaire: exclusion,
+                },
+                {
+                    nom: "Heure variable",
+                    description: "Écart réalisé − théorique du mois",
+                    metier: "Heures sup. (+) ou déficit (−)",
+                    formule: "Σ collaborateurs (H. réalisées − H. théoriques), si H. réalisées > 0",
+                    source: "Calculé",
+                    commentaire: "Un collaborateur sans heure réalisée ce mois-là compte 0",
+                },
+                {
+                    nom: "Cumul variable",
+                    description: "Solde progressif des heures variables",
+                    metier: "Banque d'heures accumulée",
+                    formule: "Σ des heures variables depuis le 1er mois exporté",
+                    source: "Calculé",
+                    commentaire: "Pas de point pour un mois sans heure réalisée",
+                },
             ],
         },
         derivation: [
             {
                 label: "H. théoriques", formula: total("theo"), value: totals.theo, numFmt: NUM,
                 children: [
-                    { label: "Source", detail: `Contrats Odoo (feuille Contrats), repli fiche employé si aucun contrat (feuille Collaborateurs) → ${segmentsSheet.rows.length} segments (feuille Segments de contrat)` },
-                    { label: "Source", detail: `Jours fériés du canton (feuille Jours fériés) — ${sourcesFeries}` },
                     { label: "Périmètre", detail: perimetre },
-                    { label: "Par segment", detail: "(jours ouvrés lun–ven − jours fériés ouvrés) × heures/jour du contrat" },
-                    { label: "Opération", detail: "Σ des segments par collaborateur et par mois, arrondi à 2 décimales (feuille Par collaborateur) → Σ des collaborateurs par mois (feuille Graphique) → Σ des mois" },
+                    { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats), repli fiche employé sans contrat (Collaborateurs)` },
+                    { label: "Jours fériés", detail: `${feriesSheet.rows.length} jours (Jours fériés) — ${sourcesFeries}` },
+                    { label: "Par segment", detail: `(j. ouvrés − j. fériés) × h/jour → ${segmentsSheet.rows.length} segments (Segments de contrat)` },
+                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi 0.01 → Σ par mois (Graphique) → Σ des mois" },
                 ],
             },
             {
                 label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM,
                 children: [
-                    {
-                        label: "Source", detail: `Feuilles de temps Odoo (account.analytic.line) → ${timesheets.rows.length} lignes (feuille Timesheets)`,
-                        children: [
-                            { label: "Filtre", detail: perimetre },
-                            { label: "Exclusion", detail: "Lignes « Congé (…) » à 0 CHF (jours fériés fictifs générés par Odoo)" },
-                        ],
-                    },
-                    { label: "Opération", detail: "Σ Heures par collaborateur et par mois (feuille Par collaborateur) → Σ des collaborateurs par mois (feuille Graphique) → Σ des mois" },
+                    { label: "Source", detail: `${timesheets.rows.length} lignes de timesheet (Timesheets)` },
+                    { label: "Exclusion", detail: exclusion },
+                    { label: "Agrégation", detail: "Σ par collaborateur et mois (Par collaborateur) → Σ par mois (Graphique) → Σ des mois" },
                 ],
             },
             {
                 label: "Heure variable (solde de la période)", formula: total("variable"), value: totals.variable, numFmt: NUM,
                 children: [
-                    { label: "Par collaborateur et par mois", detail: "H. réalisées − H. théoriques, seulement si H. réalisées > 0 (sinon 0) — feuille Par collaborateur" },
-                    { label: "Opération", detail: "Σ des collaborateurs par mois (feuille Graphique) → Σ des mois ; le Cumul variable du graphique est la somme progressive de ces mois" },
+                    { label: "Par collaborateur", detail: "H. réalisées − H. théoriques si H. réalisées > 0, sinon 0 (Par collaborateur)" },
+                    { label: "Agrégation", detail: "Σ par mois (Graphique) → Σ des mois ; Cumul variable = somme progressive" },
                 ],
             },
         ],
