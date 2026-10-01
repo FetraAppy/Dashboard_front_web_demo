@@ -252,6 +252,23 @@ export function computeMonthlyTheo(
 export interface ContractPeriod { start: Date; end: Date | null; hoursPerDay: number; }
 
 /**
+ * Date Odoo → jour du calendrier à minuit heure locale (null si vide, "False" ou invalide).
+ * `new Date("2026-04-16")` donne minuit UTC, soit 02:00 en heure suisse : comparé aux bornes de
+ * mois (minuit local), le dernier jour du mois n'était alors pas compté pour un contrat commençant
+ * en cours de mois (−1 jour ouvré) dès que le serveur n'était pas en UTC — corrigé le 2026-10-01.
+ */
+export function calendarDay(value: string | Date | null | undefined): Date | null {
+    if (!value || value === 'False') return null;
+    if (value instanceof Date) {
+        return isNaN(value.getTime()) ? null : new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/**
  * Segment du théorique : intersection d'une période de contrat avec un mois. Un mois est coupé en
  * plusieurs segments si le contrat change en cours de mois (ex. 90% jusqu'au 15 février, puis 80%).
  */
@@ -350,15 +367,10 @@ export function theoPeriodsForEmployee(
     if (contracts && contracts.length > 0) {
         return { periods: contracts, source: 'contrat' };
     }
-    const parseDate = (s: string | Date | null): Date | null => {
-        if (!s || s === 'False') return null;
-        const d = new Date(s);
-        return isNaN(d.getTime()) ? null : d;
-    };
     return {
         periods: [{
-            start: parseDate(emp.first_contract_date) ?? new Date(year, 0, 1),
-            end: parseDate(emp.departure_date),
+            start: calendarDay(emp.first_contract_date) ?? new Date(year, 0, 1),
+            end: calendarDay(emp.departure_date),
             hoursPerDay: parseFloat(String(emp.hours_per_day ?? '')) || 8,
         }],
         source: 'fiche_employe',
@@ -403,11 +415,13 @@ export async function loadContractsByEmployee(): Promise<Record<number, Contract
              ORDER BY c.employee_id, c.date_start::date ASC`
         );
         res.rows.forEach(r => {
+            const start = calendarDay(r.date_start);
+            if (!start) return;
             const empId = r.employee_id;
             if (!map[empId]) map[empId] = [];
             map[empId].push({
-                start: new Date(r.date_start),
-                end: r.date_end ? new Date(r.date_end) : null,
+                start,
+                end: calendarDay(r.date_end),
                 hoursPerDay: parseFloat(r.hours_per_day) || 8,
             });
         });

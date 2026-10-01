@@ -19,6 +19,8 @@ import { EmployeeScope, MOIS, OperationnelExportFilters } from "../export-filter
 //     → Par collaborateur → Graphique → arbre de la feuille Informations.
 // Les requêtes reprennent exactement les conditions du dashboard (operationnel.controller.ts), et
 // le théorique vient du même calcul partagé (services/theo-hours.ts).
+// Comme le graphique, le cumul variable part toujours de janvier : pour un mois filtré, les
+// données couvrent janvier → ce mois, et la feuille Graphique n'affiche que le mois filtré.
 
 /** Même exclusion que "H. réalisées" du dashboard : jours fériés fictifs générés par Odoo. */
 const EXCLUSION_FERIES_FICTIFS = "NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)";
@@ -48,7 +50,11 @@ export async function exportHeuresTheoriquesRealisees(
     scope: EmployeeScope
 ): Promise<KpiExport> {
     const { annee } = filters;
+    // Mois affichés (filtre) et mois lus : de janvier jusqu'au dernier mois affiché, pour le cumul.
     const months = scope.months;
+    const dataMonths = Array.from({ length: months[months.length - 1] }, (_, i) => i + 1);
+    const dataFrom = `${annee}-01-01`;
+    const dataTo = scope.dateTo;
 
     const [odooHolidays, cantonMap, contractsMap, empFieldsRes, tsRes, contratsRes, lieuRes] = await Promise.all([
         resolveOdooHolidayEntries(annee),
@@ -64,15 +70,16 @@ export async function exportHeuresTheoriquesRealisees(
         ),
         pool.query(
             `SELECT TO_CHAR(aal.date::date, 'YYYY-MM-DD') AS date, aal.employee_id, aal.name AS libelle,
-                    aal.unit_amount AS heures, pp.name AS projet
+                    aal.unit_amount AS heures, pp.name AS projet, pt.name AS tache
              FROM staging.account_analytic_line aal
              LEFT JOIN staging.project_project pp ON pp.id = aal.project_id
+             LEFT JOIN staging.project_task pt ON pt.id = aal.task_id
              WHERE aal.employee_id = ANY($1::int[])
                AND aal.date IS NOT NULL
                AND aal.date::date BETWEEN $2::date AND $3::date
                AND ${EXCLUSION_FERIES_FICTIFS}
              ORDER BY aal.date::date, aal.employee_id, aal.id`,
-            [scope.employeeIds, scope.dateFrom, scope.dateTo]
+            [scope.employeeIds, dataFrom, dataTo]
         ),
         // Contrats bruts d'Odoo (mêmes états que loadContractsByEmployee : open + close).
         pool.query(
@@ -96,23 +103,24 @@ export async function exportHeuresTheoriquesRealisees(
     empFieldsRes.rows.forEach(r => { empFields[r.id] = r; });
     const lieuById = new Map<number, string>(lieuRes.rows.map((r: any) => [r.id, r.work_location_name ?? ""]));
     const empById = new Map(scope.employees.map(e => [e.id, e]));
-    const monthSet = new Set(months);
+    const monthSet = new Set(dataMonths);
 
     // Mesures par collaborateur × mois, calculées ici pour servir de résultat affiché aux formules.
     const mesures = new Map<string, Mesures>();
     const keyOf = (empId: number, mois: number) => `${empId}|${mois}`;
-    scope.employees.forEach(e => months.forEach(m => mesures.set(keyOf(e.id, m), { theo: 0, real: 0, variable: 0 })));
+    scope.employees.forEach(e => dataMonths.forEach(m => mesures.set(keyOf(e.id, m), { theo: 0, real: 0, variable: 0 })));
 
     // --- Feuille Timesheets (Odoo : account.analytic.line) -------------------------------------
     const timesheets: DataSheet = {
         name: "Timesheets",
-        description: "Lignes de feuille de temps Odoo comptées dans H. réalisées",
+        description: "Lignes de feuille de temps comptées dans H. réalisées (depuis janvier, pour le cumul)",
         columns: [
             { header: "Date", key: "date", width: 12, numFmt: DATE },
             { header: "Mois", key: "mois", width: 7 },
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Société", key: "societe", width: 24 },
             { header: "Projet", key: "projet", width: 34 },
+            { header: "Tâche", key: "tache", width: 34 },
             { header: "Libellé", key: "libelle", width: 50 },
             { header: "Heures", key: "heures", width: 9, numFmt: NUM },
         ],
@@ -131,6 +139,7 @@ export async function exportHeuresTheoriquesRealisees(
             collab: emp.name,
             societe: emp.company ?? "",
             projet: r.projet ?? "",
+            tache: r.tache ?? "",
             libelle: r.libelle ?? "",
             heures,
         });
@@ -139,7 +148,7 @@ export async function exportHeuresTheoriquesRealisees(
     // --- Feuille Contrats (Odoo : hr.contract + resource.calendar) ------------------------------
     const contrats: DataSheet = {
         name: "Contrats",
-        description: "Contrats Odoo (états open et close) des collaborateurs du périmètre, avec leur horaire de travail",
+        description: "Contrats Odoo (en cours et clos) des collaborateurs du périmètre, avec leur horaire de travail",
         columns: [
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Contrat", key: "contrat", width: 28 },
@@ -163,6 +172,39 @@ export async function exportHeuresTheoriquesRealisees(
             horaire: r.horaire ?? "",
             hpj: parseFloat(r.hpj) || 8,
         });
+    });
+
+    // --- Feuille Jours fériés (Odoo : resource.calendar.leaves) ---------------------------------
+    // Construite avant les segments : leurs « Jours fériés déduits » la comptent par formule.
+    const cantonOf = (empId: number): Canton => cantonMap[empId] || "VD";
+    const cantonsUtilises = new Set<Canton>(scope.employees.map(e => cantonOf(e.id)));
+    const feriesSheet: DataSheet = {
+        name: "Jours fériés",
+        description: "Jours fériés de la période par canton ; seuls les jours ouvrés sont déduits du théorique",
+        columns: [
+            { header: "Date", key: "date", width: 12, numFmt: DATE },
+            { header: "Nom", key: "nom", width: 40 },
+            { header: "Canton", key: "canton", width: 8 },
+            { header: "Jour ouvré (déduit)", key: "ouvre", width: 19 },
+            { header: "Source", key: "source", width: 22 },
+        ],
+        rows: [],
+    };
+    [...cantonsUtilises].sort().forEach(canton => {
+        const set = holidaysByCanton[canton];
+        set.entries
+            .filter(e => isoLocal(e.date) >= dataFrom && isoLocal(e.date) <= dataTo)
+            .sort((a, b) => a.date.getTime() - b.date.getTime())
+            .forEach(e => {
+                const dow = e.date.getDay();
+                feriesSheet.rows.push({
+                    date: toExcelDate(e.date),
+                    nom: e.name,
+                    canton,
+                    ouvre: dow !== 0 && dow !== 6 ? "Oui" : "Non",
+                    source: set.source === "odoo" ? "Calendrier Odoo" : "Formule (Vaud)",
+                });
+            });
     });
 
     // --- Feuilles Collaborateurs (Odoo : hr.employee) et Segments de contrat --------------------
@@ -200,11 +242,9 @@ export async function exportHeuresTheoriquesRealisees(
         ],
         rows: [],
     };
-    const cantonsUtilises = new Set<Canton>();
     const unrounded = new Map<string, number>();
     scope.employees.forEach(emp => {
-        const canton: Canton = cantonMap[emp.id] || "VD";
-        cantonsUtilises.add(canton);
+        const canton = cantonOf(emp.id);
         const fields = empFields[emp.id] ?? { hours_per_day: null, first_contract_date: null, departure_date: null, horaire: null };
         const { periods, source } = theoPeriodsForEmployee(contractsMap[emp.id], fields, annee);
         const sourceLabel = source === "contrat" ? "Contrat" : "Fiche employé";
@@ -229,7 +269,8 @@ export async function exportHeuresTheoriquesRealisees(
             .forEach(s => {
                 const i = segmentsSheet.rows.length;
                 unrounded.set(keyOf(emp.id, s.month + 1), (unrounded.get(keyOf(emp.id, s.month + 1)) ?? 0) + s.hours);
-                const joursRef = `(${cellRef(segmentsSheet, "jours_ouvres", i)}-${cellRef(segmentsSheet, "feries", i)})`;
+                const seg = (key: string) => cellRef(segmentsSheet, key, i);
+                const joursRef = `(${seg("jours_ouvres")}-${seg("feries")})`;
                 segmentsSheet.rows.push({
                     collab: emp.name,
                     canton,
@@ -238,8 +279,14 @@ export async function exportHeuresTheoriquesRealisees(
                     fin: toExcelDate(s.to),
                     source: sourceLabel,
                     hpj: s.hoursPerDay,
-                    jours_ouvres: s.workingDays,
-                    feries: s.holidays.length,
+                    // Lundi → vendredi entre Début et Fin inclus.
+                    jours_ouvres: fx(`NETWORKDAYS(${seg("debut")},${seg("fin")})`, s.workingDays),
+                    // Jours fériés ouvrés du canton tombant entre Début et Fin (feuille Jours fériés).
+                    feries: fx(
+                        `COUNTIFS(${columnRange(feriesSheet, "date")},">="&${seg("debut")},${columnRange(feriesSheet, "date")},"<="&${seg("fin")},`
+                        + `${columnRange(feriesSheet, "canton")},${seg("canton")},${columnRange(feriesSheet, "ouvre")},"Oui")`,
+                        s.holidays.length
+                    ),
                     feries_dates: s.holidays.map(frDate).join(", "),
                     theo: fx(`${joursRef}*${cellRef(segmentsSheet, "hpj", i)}`, s.hours),
                 });
@@ -252,36 +299,6 @@ export async function exportHeuresTheoriquesRealisees(
     });
     // Heure variable PAR PERSONNE : réalisé − théorique seulement si son réalisé du mois est > 0.
     mesures.forEach(m => { m.variable = m.real > 0 ? m.real - m.theo : 0; });
-
-    // --- Feuille Jours fériés (Odoo : resource.calendar.leaves) ---------------------------------
-    const feriesSheet: DataSheet = {
-        name: "Jours fériés",
-        description: "Jours fériés de la période par canton ; seuls les jours ouvrés sont déduits du théorique",
-        columns: [
-            { header: "Date", key: "date", width: 12, numFmt: DATE },
-            { header: "Nom", key: "nom", width: 40 },
-            { header: "Canton", key: "canton", width: 8 },
-            { header: "Jour ouvré (déduit)", key: "ouvre", width: 19 },
-            { header: "Source", key: "source", width: 22 },
-        ],
-        rows: [],
-    };
-    [...cantonsUtilises].sort().forEach(canton => {
-        const set = holidaysByCanton[canton];
-        set.entries
-            .filter(e => isoLocal(e.date) >= scope.dateFrom && isoLocal(e.date) <= scope.dateTo)
-            .sort((a, b) => a.date.getTime() - b.date.getTime())
-            .forEach(e => {
-                const dow = e.date.getDay();
-                feriesSheet.rows.push({
-                    date: toExcelDate(e.date),
-                    nom: e.name,
-                    canton,
-                    ouvre: dow !== 0 && dow !== 6 ? "Oui" : "Non",
-                    source: set.source === "odoo" ? "Calendrier Odoo" : "Formule (Vaud)",
-                });
-            });
-    });
 
     // --- Feuille Par collaborateur --------------------------------------------------------------
     const parCollab: DataSheet = {
@@ -302,7 +319,7 @@ export async function exportHeuresTheoriquesRealisees(
     const tsSum = (i: number) =>
         `SUMIFS(${columnRange(timesheets, "heures")},${columnRange(timesheets, "collab")},${cellRef(parCollab, "collab", i)},${columnRange(timesheets, "mois")},${cellRef(parCollab, "mois", i)})`;
     [...scope.employees].sort((a, b) => a.name.localeCompare(b.name)).forEach(emp => {
-        months.forEach(mois => {
+        dataMonths.forEach(mois => {
             const i = parCollab.rows.length;
             const m = mesures.get(keyOf(emp.id, mois))!;
             const theoC = cellRef(parCollab, "theo", i);
@@ -333,9 +350,12 @@ export async function exportHeuresTheoriquesRealisees(
         rows: [],
         lastRowIsTotal: true,
     };
-    const pcSum = (key: string, i: number) =>
-        `SUMIFS(${columnRange(parCollab, key)},${columnRange(parCollab, "mois")},${cellRef(graphique, "mois", i)})`;
+    // Somme d'une colonne de "Par collaborateur" pour le mois de la ligne (ou jusqu'à ce mois si "<=").
+    const pcSum = (key: string, i: number, comparaison = "") =>
+        `SUMIFS(${columnRange(parCollab, key)},${columnRange(parCollab, "mois")},${comparaison ? `"${comparaison}"&` : ""}${cellRef(graphique, "mois", i)})`;
     const ref = (key: string, i: number) => cellRef(graphique, key, i);
+    const variableDuMois = (mois: number) =>
+        scope.employees.reduce((s, e) => s + mesures.get(keyOf(e.id, mois))!.variable, 0);
     const totals = { theo: 0, real: 0, variable: 0 };
     months.forEach(mois => {
         const i = graphique.rows.length;
@@ -345,17 +365,16 @@ export async function exportHeuresTheoriquesRealisees(
             agg.theo += m.theo; agg.real += m.real; agg.variable += m.variable;
         });
         totals.theo += agg.theo; totals.real += agg.real; totals.variable += agg.variable;
-        // Comme le dashboard : pas de point de cumul pour un mois sans aucune heure réalisée.
+        // Comme le graphique : cumul depuis janvier (même pour un seul mois filtré), sans sauter de
+        // mois — un mois sans heure réalisée a une heure variable de 0, la courbe reste à plat.
+        const cumul = dataMonths.filter(m => m <= mois).reduce((s, m) => s + variableDuMois(m), 0);
         graphique.rows.push({
             mois,
             mois_nom: MOIS[mois - 1],
             theo: fx(pcSum("theo", i), agg.theo),
             real: fx(pcSum("real", i), agg.real),
             variable: fx(pcSum("variable", i), agg.variable),
-            cumul: fx(
-                `IF(${ref("real", i)}>0,SUM(${ref("variable", 0)}:${ref("variable", i)}),"—")`,
-                agg.real > 0 ? totals.variable : "—"
-            ),
+            cumul: fx(pcSum("variable", i, "<="), cumul),
         });
     });
     const t = graphique.rows.length; // index de la ligne Total
@@ -375,7 +394,8 @@ export async function exportHeuresTheoriquesRealisees(
     const sourcesFeries = [...cantonsUtilises].sort()
         .map(c => `${c} : ${holidaysByCanton[c].source === "odoo" ? "calendrier Odoo" : "formule (Vaud)"}`)
         .join(" · ");
-    const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""}, du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`;
+    const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""}, du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`
+        + (filters.mois && filters.mois > 1 ? ` (données depuis le 01.01.${annee} pour le cumul)` : "");
     const exclusion = "Hors lignes « Congé (…) » à 0 CHF (jours fériés fictifs Odoo)";
 
     return {
@@ -419,9 +439,9 @@ export async function exportHeuresTheoriquesRealisees(
                     nom: "Cumul variable",
                     description: "Solde progressif des heures variables",
                     metier: "Banque d'heures accumulée",
-                    formule: "Σ des heures variables depuis le 1er mois exporté",
+                    formule: "Σ des heures variables depuis janvier",
                     source: "Calculé",
-                    commentaire: "Pas de point pour un mois sans heure réalisée",
+                    commentaire: "Part de janvier même pour un seul mois filtré ; reste à plat les mois sans heure réalisée",
                 },
             ],
         },
@@ -430,10 +450,10 @@ export async function exportHeuresTheoriquesRealisees(
                 label: "H. théoriques", formula: total("theo"), value: totals.theo, numFmt: NUM,
                 children: [
                     { label: "Périmètre", detail: perimetre },
-                    { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats), repli fiche employé sans contrat (Collaborateurs)` },
+                    { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats) ; sans contrat : horaire de la fiche employé (Collaborateurs)` },
                     { label: "Jours fériés", detail: `${feriesSheet.rows.length} jours (Jours fériés) — ${sourcesFeries}` },
                     { label: "Par segment", detail: `(j. ouvrés − j. fériés) × h/jour → ${segmentsSheet.rows.length} segments (Segments de contrat)` },
-                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi 0.01 → Σ par mois (Graphique) → Σ des mois" },
+                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi à 2 décimales → Σ par mois (Graphique) → Σ des mois" },
                 ],
             },
             {
@@ -448,7 +468,7 @@ export async function exportHeuresTheoriquesRealisees(
                 label: "Heure variable (solde de la période)", formula: total("variable"), value: totals.variable, numFmt: NUM,
                 children: [
                     { label: "Par collaborateur", detail: "H. réalisées − H. théoriques si H. réalisées > 0, sinon 0 (Par collaborateur)" },
-                    { label: "Agrégation", detail: "Σ par mois (Graphique) → Σ des mois ; Cumul variable = somme progressive" },
+                    { label: "Agrégation", detail: "Σ par mois (Graphique) → Σ des mois affichés ; Cumul variable = somme depuis janvier" },
                 ],
             },
         ],

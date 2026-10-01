@@ -148,7 +148,7 @@ export async function exportSuiviMensuelDetaille(
     // --- Feuille Contrats (Odoo : hr.contract + resource.calendar) ------------------------------
     const contrats: DataSheet = {
         name: "Contrats",
-        description: "Contrats Odoo (open et close) du périmètre, avec leur horaire de travail",
+        description: "Contrats Odoo (en cours et clos) du périmètre, avec leur horaire de travail",
         columns: [
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Contrat", key: "contrat", width: 28 },
@@ -192,6 +192,39 @@ export async function exportSuiviMensuelDetaille(
         rows: [],
     };
 
+    // --- Feuille Jours fériés -----------------------------------------------------------------
+    // Construite avant les segments : leurs « Jours fériés déduits » la comptent par formule.
+    const cantonOf = (empId: number): Canton => cantonMap[empId] || "VD";
+    const cantonsUtilises = new Set<Canton>(scope.employees.map(e => cantonOf(e.id)));
+    const feriesSheet: DataSheet = {
+        name: "Jours fériés",
+        description: "Jours fériés de la période par canton ; seuls les jours ouvrés sont déduits du théorique",
+        columns: [
+            { header: "Date", key: "date", width: 12, numFmt: DATE },
+            { header: "Nom", key: "nom", width: 40 },
+            { header: "Canton", key: "canton", width: 8 },
+            { header: "Jour ouvré (déduit)", key: "ouvre", width: 19 },
+            { header: "Source", key: "source", width: 22 },
+        ],
+        rows: [],
+    };
+    [...cantonsUtilises].sort().forEach(canton => {
+        const set = holidaysByCanton[canton];
+        set.entries
+            .filter(e => isoLocal(e.date) >= scope.dateFrom && isoLocal(e.date) <= scope.dateTo)
+            .sort((a, b) => a.date.getTime() - b.date.getTime())
+            .forEach(e => {
+                const dow = e.date.getDay();
+                feriesSheet.rows.push({
+                    date: toExcelDate(e.date),
+                    nom: e.name,
+                    canton,
+                    ouvre: dow !== 0 && dow !== 6 ? "Oui" : "Non",
+                    source: set.source === "odoo" ? "Calendrier Odoo" : "Formule (Vaud)",
+                });
+            });
+    });
+
     // --- Feuille Segments de contrat (théorique et référence 100% de l'ETP) -------------------
     const segmentsSheet: DataSheet = {
         name: "Segments de contrat",
@@ -212,11 +245,9 @@ export async function exportSuiviMensuelDetaille(
         ],
         rows: [],
     };
-    const cantonsUtilises = new Set<Canton>();
     const unrounded = new Map<string, { theo: number; ref100: number }>();
     scope.employees.forEach(emp => {
-        const canton: Canton = cantonMap[emp.id] || "VD";
-        cantonsUtilises.add(canton);
+        const canton = cantonOf(emp.id);
         const fields = empFields[emp.id] ?? { hours_per_day: null, first_contract_date: null, departure_date: null, horaire: null };
         const { periods, source } = theoPeriodsForEmployee(contractsMap[emp.id], fields, annee);
         const sourceLabel = source === "contrat" ? "Contrat" : "Fiche employé";
@@ -245,7 +276,8 @@ export async function exportSuiviMensuelDetaille(
                 acc.theo += s.hours;
                 acc.ref100 += ref100;
                 unrounded.set(keyOf(emp.id, s.month + 1), acc);
-                const joursRef = `(${cellRef(segmentsSheet, "jours_ouvres", i)}-${cellRef(segmentsSheet, "feries", i)})`;
+                const seg = (key: string) => cellRef(segmentsSheet, key, i);
+                const joursRef = `(${seg("jours_ouvres")}-${seg("feries")})`;
                 segmentsSheet.rows.push({
                     collab: emp.name,
                     canton,
@@ -254,10 +286,16 @@ export async function exportSuiviMensuelDetaille(
                     fin: toExcelDate(s.to),
                     source: sourceLabel,
                     hpj: s.hoursPerDay,
-                    jours_ouvres: s.workingDays,
-                    feries: s.holidays.length,
+                    // Lundi → vendredi entre Début et Fin inclus.
+                    jours_ouvres: fx(`NETWORKDAYS(${seg("debut")},${seg("fin")})`, s.workingDays),
+                    // Jours fériés ouvrés du canton tombant entre Début et Fin (feuille Jours fériés).
+                    feries: fx(
+                        `COUNTIFS(${columnRange(feriesSheet, "date")},">="&${seg("debut")},${columnRange(feriesSheet, "date")},"<="&${seg("fin")},`
+                        + `${columnRange(feriesSheet, "canton")},${seg("canton")},${columnRange(feriesSheet, "ouvre")},"Oui")`,
+                        s.holidays.length
+                    ),
                     feries_dates: s.holidays.map(frDate).join(", "),
-                    theo: fx(`${joursRef}*${cellRef(segmentsSheet, "hpj", i)}`, s.hours),
+                    theo: fx(`${joursRef}*${seg("hpj")}`, s.hours),
                     ref100: fx(`${joursRef}*8`, ref100),
                 });
             });
@@ -266,36 +304,6 @@ export async function exportSuiviMensuelDetaille(
     unrounded.forEach((v, k) => {
         const m = mesures.get(k);
         if (m) { m.theo = round2(v.theo); m.ref100 = round2(v.ref100); }
-    });
-
-    // --- Feuille Jours fériés -----------------------------------------------------------------
-    const feriesSheet: DataSheet = {
-        name: "Jours fériés",
-        description: "Jours fériés de la période par canton ; seuls les jours ouvrés sont déduits du théorique",
-        columns: [
-            { header: "Date", key: "date", width: 12, numFmt: DATE },
-            { header: "Nom", key: "nom", width: 40 },
-            { header: "Canton", key: "canton", width: 8 },
-            { header: "Jour ouvré (déduit)", key: "ouvre", width: 19 },
-            { header: "Source", key: "source", width: 22 },
-        ],
-        rows: [],
-    };
-    [...cantonsUtilises].sort().forEach(canton => {
-        const set = holidaysByCanton[canton];
-        set.entries
-            .filter(e => isoLocal(e.date) >= scope.dateFrom && isoLocal(e.date) <= scope.dateTo)
-            .sort((a, b) => a.date.getTime() - b.date.getTime())
-            .forEach(e => {
-                const dow = e.date.getDay();
-                feriesSheet.rows.push({
-                    date: toExcelDate(e.date),
-                    nom: e.name,
-                    canton,
-                    ouvre: dow !== 0 && dow !== 6 ? "Oui" : "Non",
-                    source: set.source === "odoo" ? "Calendrier Odoo" : "Formule (Vaud)",
-                });
-            });
     });
 
     // --- Feuille Par collaborateur --------------------------------------------------------------
@@ -482,10 +490,10 @@ export async function exportSuiviMensuelDetaille(
                 label: "H. théoriques", formula: total("theo"), value: totals.theo, numFmt: NUM,
                 children: [
                     { label: "Périmètre", detail: perimetre },
-                    { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats), repli fiche employé sans contrat (Collaborateurs)` },
+                    { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats) ; sans contrat : horaire de la fiche employé (Collaborateurs)` },
                     { label: "Jours fériés", detail: `${feriesSheet.rows.length} jours (Jours fériés) — ${sourcesFeries}` },
                     { label: "Par segment", detail: `(j. ouvrés − j. fériés) × h/jour → ${segmentsSheet.rows.length} segments (Segments de contrat)` },
-                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi 0.01 → Σ par mois (Tableau) → Σ des mois" },
+                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi à 2 décimales → Σ par mois (Tableau) → Σ des mois" },
                 ],
             },
             {
@@ -523,7 +531,7 @@ export async function exportSuiviMensuelDetaille(
             {
                 label: "ETP", formula: total("etp"), value: round2(totals.etp), numFmt: NUM,
                 children: [
-                    { label: "Par mois", detail: "min(1, Σ H. théoriques ÷ Σ Référence 100%), arrondi 0.01 (Tableau)" },
+                    { label: "Par mois", detail: "min(1, Σ H. théoriques ÷ Σ Référence 100%), arrondi à 2 décimales (Tableau)" },
                     { label: "Référence 100%", detail: "Mêmes segments de contrat à 8h/jour (Segments de contrat)" },
                     { label: "Total", detail: "Somme des ETP mensuels (pas une moyenne)" },
                 ],
