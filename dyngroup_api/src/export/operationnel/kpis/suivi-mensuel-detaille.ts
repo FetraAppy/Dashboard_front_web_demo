@@ -15,7 +15,8 @@ import { EmployeeScope, MOIS, OperationnelExportFilters } from "../export-filter
 
 // Export du "Tableau de suivi mensuel détaillé" (onglet Suivi Mensuel & Détails).
 // Chaîne de calcul, uniquement par formules Excel :
-//   Timesheets + Segments de contrat → Par collaborateur → Tableau → arbre de la feuille Informations.
+//   Timesheets + Segments de contrat (← Contrats, Collaborateurs, Jours fériés)
+//     → Par collaborateur → Tableau → arbre de la feuille Informations.
 // Les requêtes reprennent exactement les conditions du dashboard (operationnel.controller.ts), et
 // le théorique vient du même calcul partagé (services/theo-hours.ts).
 
@@ -33,6 +34,13 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad
 const frDate = (d: Date) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 const fx = (formula: string, result: number | string): FormulaCell => ({ formula, result });
 
+/** Date Odoo brute (texte "YYYY-MM-DD…" ou Date) → jour UTC pour Excel ; null si vide/"False". */
+function odooDay(value: unknown): Date | null {
+    if (value instanceof Date) return isNaN(value.getTime()) ? null : toExcelDate(value);
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ""));
+    return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+}
+
 interface Mesures { theo: number; ref100: number; real: number; prod: number }
 
 export async function exportSuiviMensuelDetaille(
@@ -42,13 +50,13 @@ export async function exportSuiviMensuelDetaille(
     const { annee } = filters;
     const months = scope.months;
 
-    const [odooHolidays, cantonMap, contractsMap, empFieldsRes, tsRes] = await Promise.all([
+    const [odooHolidays, cantonMap, contractsMap, empFieldsRes, tsRes, contratsRes, lieuRes] = await Promise.all([
         resolveOdooHolidayEntries(annee),
         loadCantonByEmployee(),
         loadContractsByEmployee(),
         // Mêmes champs que la liste d'employés du dashboard (repli quand il n'y a pas de contrat).
         pool.query(
-            `SELECT emp.id, rc.hours_per_day, emp.first_contract_date, emp.departure_date
+            `SELECT emp.id, rc.hours_per_day, rc.name AS horaire, emp.first_contract_date, emp.departure_date
              FROM staging.hr_employee emp
              LEFT JOIN staging.resource_calendar rc ON emp.resource_calendar_id = rc.id
              WHERE emp.id = ANY($1::int[])`,
@@ -67,11 +75,27 @@ export async function exportSuiviMensuelDetaille(
              ORDER BY aal.date::date, aal.employee_id, aal.id`,
             [scope.employeeIds, scope.dateFrom, scope.dateTo]
         ),
+        // Contrats bruts d'Odoo (mêmes états que loadContractsByEmployee : open + close).
+        pool.query(
+            `SELECT c.id, c.name, c.employee_id, c.state, c.date_start, c.date_end,
+                    rc.name AS horaire, COALESCE(rc.hours_per_day, 8) AS hpj
+             FROM staging.hr_contract c
+             LEFT JOIN staging.resource_calendar rc ON c.resource_calendar_id = rc.id
+             WHERE c.employee_id = ANY($1::int[]) AND c.state IN ('open', 'close') AND c.date_start IS NOT NULL
+             ORDER BY c.employee_id, c.date_start::date`,
+            [scope.employeeIds]
+        ).catch(() => ({ rows: [] as any[] })), // staging.hr_contract pas encore extrait
+        // Lieu de travail brut (d'où vient le canton) — colonne pas encore extraite avant stage1_hr.
+        pool.query(
+            `SELECT id, work_location_name FROM staging.hr_employee WHERE id = ANY($1::int[])`,
+            [scope.employeeIds]
+        ).catch(() => ({ rows: [] as any[] })),
     ]);
 
     const holidaysByCanton = buildHolidaysByCanton(odooHolidays, annee);
-    const empFields: Record<number, TheoEmployeeFields> = {};
+    const empFields: Record<number, TheoEmployeeFields & { horaire: string | null }> = {};
     empFieldsRes.rows.forEach(r => { empFields[r.id] = r; });
+    const lieuById = new Map<number, string>(lieuRes.rows.map((r: any) => [r.id, r.work_location_name ?? ""]));
     const empById = new Map(scope.employees.map(e => [e.id, e]));
     const monthSet = new Set(months);
 
@@ -121,10 +145,57 @@ export async function exportSuiviMensuelDetaille(
         });
     });
 
+    // --- Feuille Contrats (Odoo : hr.contract + resource.calendar) ------------------------------
+    const contrats: DataSheet = {
+        name: "Contrats",
+        description: "Contrats Odoo (open et close) du périmètre, avec leur horaire de travail",
+        columns: [
+            { header: "Collaborateur", key: "collab", width: 28 },
+            { header: "Contrat", key: "contrat", width: 28 },
+            { header: "État", key: "etat", width: 9 },
+            { header: "Début", key: "debut", width: 12, numFmt: DATE },
+            { header: "Fin", key: "fin", width: 12, numFmt: DATE },
+            { header: "Horaire de travail", key: "horaire", width: 28 },
+            { header: "Heures/jour", key: "hpj", width: 12, numFmt: NUM },
+        ],
+        rows: [],
+    };
+    contratsRes.rows.forEach((r: any) => {
+        const emp = empById.get(r.employee_id);
+        if (!emp) return;
+        contrats.rows.push({
+            collab: emp.name,
+            contrat: r.name ?? "",
+            etat: r.state === "close" ? "Clos" : "En cours",
+            debut: odooDay(r.date_start),
+            fin: odooDay(r.date_end),
+            horaire: r.horaire ?? "",
+            hpj: parseFloat(r.hpj) || 8,
+        });
+    });
+
+    // --- Feuille Collaborateurs (Odoo : hr.employee) -------------------------------------------
+    const collaborateurs: DataSheet = {
+        name: "Collaborateurs",
+        description: "Fiche employé Odoo : société, lieu de travail (→ canton des jours fériés), base du théorique",
+        columns: [
+            { header: "Collaborateur", key: "collab", width: 28 },
+            { header: "Société", key: "societe", width: 24 },
+            { header: "Lieu de travail", key: "lieu", width: 20 },
+            { header: "Canton", key: "canton", width: 8 },
+            { header: "1er contrat", key: "premier", width: 12, numFmt: DATE },
+            { header: "Départ", key: "depart", width: 12, numFmt: DATE },
+            { header: "Horaire (fiche)", key: "horaire", width: 24 },
+            { header: "Heures/jour (fiche)", key: "hpj", width: 18, numFmt: NUM },
+            { header: "Théorique calculé d'après", key: "source", width: 24 },
+        ],
+        rows: [],
+    };
+
     // --- Feuille Segments de contrat (théorique et référence 100% de l'ETP) -------------------
     const segmentsSheet: DataSheet = {
         name: "Segments de contrat",
-        description: "Théorique par collaborateur, mois et période de contrat (un mois est coupé si le contrat change en cours de mois)",
+        description: "Théorique par collaborateur, mois et période de contrat (mois coupé si le contrat change en cours de mois)",
         columns: [
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Canton", key: "canton", width: 8 },
@@ -146,8 +217,24 @@ export async function exportSuiviMensuelDetaille(
     scope.employees.forEach(emp => {
         const canton: Canton = cantonMap[emp.id] || "VD";
         cantonsUtilises.add(canton);
-        const fields = empFields[emp.id] ?? { hours_per_day: null, first_contract_date: null, departure_date: null };
+        const fields = empFields[emp.id] ?? { hours_per_day: null, first_contract_date: null, departure_date: null, horaire: null };
         const { periods, source } = theoPeriodsForEmployee(contractsMap[emp.id], fields, annee);
+        const sourceLabel = source === "contrat" ? "Contrat" : "Fiche employé";
+
+        collaborateurs.rows.push({
+            collab: emp.name,
+            societe: emp.company ?? "",
+            lieu: lieuById.get(emp.id) ?? "",
+            canton,
+            premier: odooDay(fields.first_contract_date),
+            depart: odooDay(fields.departure_date),
+            horaire: fields.horaire ?? "",
+            hpj: fields.hours_per_day === null || fields.hours_per_day === undefined
+                ? null
+                : parseFloat(String(fields.hours_per_day)) || null,
+            source: sourceLabel,
+        });
+
         // Année complète (toDate=false), comme la colonne H. théoriques du dashboard.
         computeTheoSegments(periods, annee, holidaysByCanton[canton].fullYear, false)
             .filter(s => monthSet.has(s.month + 1))
@@ -165,7 +252,7 @@ export async function exportSuiviMensuelDetaille(
                     mois: s.month + 1,
                     debut: toExcelDate(s.from),
                     fin: toExcelDate(s.to),
-                    source: source === "contrat" ? "Contrat" : "Fiche employé",
+                    source: sourceLabel,
                     hpj: s.hoursPerDay,
                     jours_ouvres: s.workingDays,
                     feries: s.holidays.length,
@@ -266,6 +353,7 @@ export async function exportSuiviMensuelDetaille(
             { header: "ETP", key: "etp", width: 7, numFmt: NUM },
         ],
         rows: [],
+        lastRowIsTotal: true,
     };
     const pcSum = (key: string, i: number) =>
         `SUMIFS(${columnRange(parCollab, key)},${columnRange(parCollab, "mois")},${cellRef(tableau, "mois", i)})`;
@@ -320,11 +408,12 @@ export async function exportSuiviMensuelDetaille(
     const nbCollab = scope.employees.length;
     const nbLignes = timesheets.rows.length;
     const nbProductives = timesheets.rows.filter(r => r.productivite === "Oui").length;
-    const periode = `du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`;
     const sourcesFeries = [...cantonsUtilises].sort()
         .map(c => `${c} : ${holidaysByCanton[c].source === "odoo" ? "calendrier Odoo" : "formule (Vaud)"}`)
         .join(" · ");
-    const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""} · période ${periode}`;
+    const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""}, du ${frDate(new Date(scope.dateFrom))} au ${frDate(new Date(scope.dateTo))}`;
+    const exclusion = "Hors lignes « Congé (…) » à 0 CHF (jours fériés fictifs Odoo)";
+    const sommeHeures = "Σ par collaborateur et mois (Par collaborateur) → Σ par mois (Tableau) → Σ des mois";
 
     return {
         definition: {
@@ -332,65 +421,59 @@ export async function exportSuiviMensuelDetaille(
             titre: "Tableau de suivi mensuel détaillé",
             onglet: "Suivi Mensuel & Détails",
             description: "Heures théoriques, réalisées et productives, taux d'effort et de productivité, et ETP, par mois",
-            cible: "Taux effort : ≥ 95% vert · 85–95% orange · < 85% rouge ; Taux Productivité : ≥ 100% vert · 80–99% orange · < 80% rouge",
             tables: [
                 "staging.account_analytic_line", "staging.project_project", "staging.project_task",
                 "staging.hr_employee", "staging.hr_contract", "staging.resource_calendar",
                 "staging.resource_calendar_leaves", "staging.res_company", "kpi.operationnel_suivi_mensuel",
-            ],
-            commentaires: [
-                "Les lignes « Congé (…) » à 0 CHF (jours fériés fictifs générés par Odoo) sont exclues des heures réalisées et productives.",
-                "« Tous les mois » couvre l'année complète, mois futurs inclus (théorique et ETP calculés d'après les contrats).",
-                "Ligne « Total ou Moy. » : sommes pour les heures, rapport des totaux pour les taux, somme des ETP mensuels pour l'ETP.",
             ],
             colonnes: [
                 {
                     nom: "H. théoriques",
                     description: "Heures dues selon le contrat",
                     metier: "Charge de travail contractuelle attendue",
-                    formule: "(jours ouvrés − jours fériés du canton) × heures/jour du contrat, calculé par sous-période si le contrat change en cours de mois, puis sommé",
-                    source: "Contrats + calendrier des jours fériés",
-                    commentaire: "Année complète (n'exclut pas les mois futurs)",
+                    formule: "(j. ouvrés − j. fériés du canton) × h/jour du contrat, par sous-période de contrat",
+                    source: "Contrats + jours fériés",
+                    commentaire: "Année complète, mois futurs inclus",
                 },
                 {
                     nom: "H. réalisées",
                     description: "Heures saisies en feuille de temps",
-                    metier: "Présence/activité réelle",
-                    formule: "H. réalisées = Σ heures de timesheet",
-                    source: "Feuilles de temps",
-                    commentaire: "Hors lignes « Congé (…) » à 0 CHF (jours fériés fictifs)",
+                    metier: "Présence / activité réelle",
+                    formule: "Σ heures de timesheet",
+                    source: "Timesheets",
+                    commentaire: exclusion,
                 },
                 {
                     nom: "Taux effort",
                     description: "% du contrat effectivement travaillé",
-                    metier: "Sur-régime ou sous-régime par rapport au contrat",
-                    formule: "Taux effort = (H. réalisées / H. théoriques) × 100",
+                    metier: "Sur- ou sous-régime par rapport au contrat",
+                    formule: "H. réalisées ÷ H. théoriques × 100",
                     source: "Calculé",
-                    commentaire: "Seuils : ≥ 95% vert, 85–95% orange, < 85% rouge. Ligne Total : rapport des totaux",
+                    commentaire: "≥ 95% vert · 85–95% orange · < 85% rouge",
                 },
                 {
                     nom: "H. Productivité",
                     description: "Heures marquées « productives »",
                     metier: "Volume de travail à valeur ajoutée",
-                    formule: "H. Productivité = Σ heures de timesheet avec Productivité = Oui",
-                    source: "Feuilles de temps (case « Productivité »)",
-                    commentaire: "Hors lignes « Congé (…) » à 0 CHF (jours fériés fictifs)",
+                    formule: "Σ heures de timesheet avec Productivité = Oui",
+                    source: "Timesheets",
+                    commentaire: exclusion,
                 },
                 {
                     nom: "Taux Productivité",
                     description: "% du réalisé qui est productif",
                     metier: "Efficacité individuelle",
-                    formule: "Taux Productivité = (H. Productivité / H. réalisées) × 100",
+                    formule: "H. Productivité ÷ H. réalisées × 100",
                     source: "Calculé",
-                    commentaire: "Seuils : ≥ 100% vert, 80–99% orange, < 80% rouge. Ligne Total : rapport des totaux",
+                    commentaire: "≥ 100% vert · 80–99% orange · < 80% rouge",
                 },
                 {
                     nom: "ETP",
-                    description: "Taux d'activité contractuel (équivalent temps plein)",
-                    metier: "% du temps plein pour lequel la personne est engagée",
-                    formule: "ETP = min(1, H. théoriques réelles / H. théoriques référence 100%)",
+                    description: "Équivalent temps plein contractuel",
+                    metier: "Part du temps plein pour laquelle la personne est engagée",
+                    formule: "min(1, H. théoriques ÷ H. théoriques à 8h/jour)",
                     source: "Calculé (contrats)",
-                    commentaire: "Référence 100% = même fenêtre de contrat à 8h/jour. Ligne Total : somme des ETP mensuels (pas une moyenne)",
+                    commentaire: "Total : somme des ETP mensuels",
                 },
             ],
         },
@@ -398,73 +481,54 @@ export async function exportSuiviMensuelDetaille(
             {
                 label: "H. théoriques", formula: total("theo"), value: totals.theo, numFmt: NUM,
                 children: [
-                    { label: "Source", detail: `Contrats (hr_contract), repli fiche employé si aucun contrat → ${segmentsSheet.rows.length} segments (feuille Segments de contrat)` },
-                    { label: "Source", detail: `Jours fériés du canton (feuille Jours fériés) — ${sourcesFeries}` },
                     { label: "Périmètre", detail: perimetre },
-                    { label: "Par segment", detail: "(jours ouvrés lun–ven − jours fériés ouvrés) × heures/jour du contrat" },
-                    { label: "Opération", detail: "Σ des segments par collaborateur et par mois, arrondi à 2 décimales (feuille Par collaborateur) → Σ des collaborateurs par mois (feuille Tableau) → Σ des mois" },
+                    { label: "Contrats", detail: `${contrats.rows.length} contrats (Contrats), repli fiche employé sans contrat (Collaborateurs)` },
+                    { label: "Jours fériés", detail: `${feriesSheet.rows.length} jours (Jours fériés) — ${sourcesFeries}` },
+                    { label: "Par segment", detail: `(j. ouvrés − j. fériés) × h/jour → ${segmentsSheet.rows.length} segments (Segments de contrat)` },
+                    { label: "Agrégation", detail: "Σ segments par collaborateur et mois, arrondi 0.01 → Σ par mois (Tableau) → Σ des mois" },
                 ],
             },
             {
                 label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM,
                 children: [
-                    {
-                        label: "Source", detail: `Feuilles de temps (account_analytic_line) → ${nbLignes} lignes (feuille Timesheets)`,
-                        children: [
-                            { label: "Filtre", detail: perimetre },
-                            { label: "Exclusion", detail: "Lignes « Congé (…) » à 0 CHF (jours fériés fictifs générés par Odoo)" },
-                        ],
-                    },
-                    { label: "Opération", detail: "Σ Heures par collaborateur et par mois (feuille Par collaborateur) → Σ des collaborateurs par mois (feuille Tableau) → Σ des mois" },
+                    { label: "Source", detail: `${nbLignes} lignes de timesheet (Timesheets)` },
+                    { label: "Exclusion", detail: exclusion },
+                    { label: "Agrégation", detail: sommeHeures },
                 ],
             },
             {
                 label: "Taux effort (%)", formula: total("taux_effort"), value: tauxEffortTotal, numFmt: NUM,
                 children: [
-                    { label: "Formule", detail: "H. réalisées ÷ H. théoriques × 100" },
                     { label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM },
                     { label: "H. théoriques", formula: total("theo"), value: totals.theo, numFmt: NUM },
-                    { label: "Ligne Total", detail: "Σ H. réalisées ÷ Σ H. théoriques (pas la moyenne des taux mensuels)" },
-                    { label: "Cible", detail: "≥ 95% vert · 85–95% orange · < 85% rouge" },
+                    { label: "Formule", detail: "H. réalisées ÷ H. théoriques × 100 (Total : rapport des totaux)" },
                 ],
             },
             {
                 label: "H. Productivité", formula: total("prod"), value: totals.prod, numFmt: NUM,
                 children: [
-                    {
-                        label: "Source", detail: `Feuilles de temps (account_analytic_line) → ${nbProductives} lignes avec Productivité = Oui (feuille Timesheets)`,
-                        children: [
-                            { label: "Filtre", detail: "Productivité = Oui" },
-                            { label: "Filtre", detail: perimetre },
-                            { label: "Exclusion", detail: "Lignes « Congé (…) » à 0 CHF (jours fériés fictifs générés par Odoo)" },
-                        ],
-                    },
-                    { label: "Opération", detail: "Σ Heures par collaborateur et par mois (feuille Par collaborateur) → Σ des collaborateurs par mois (feuille Tableau) → Σ des mois" },
+                    { label: "Source", detail: `${nbProductives} lignes avec Productivité = Oui (Timesheets)` },
+                    { label: "Exclusion", detail: exclusion },
+                    { label: "Agrégation", detail: sommeHeures },
                 ],
             },
             {
                 label: "Taux Productivité (%)", formula: total("taux_prod"), value: tauxProdTotal, numFmt: NUM,
                 children: [
-                    { label: "Formule", detail: "H. Productivité ÷ H. réalisées × 100" },
                     { label: "H. Productivité", formula: total("prod"), value: totals.prod, numFmt: NUM },
                     { label: "H. réalisées", formula: total("real"), value: totals.real, numFmt: NUM },
-                    { label: "Ligne Total", detail: "Σ H. Productivité ÷ Σ H. réalisées" },
-                    { label: "Cible", detail: "≥ 100% vert · 80–99% orange · < 80% rouge" },
+                    { label: "Formule", detail: "H. Productivité ÷ H. réalisées × 100 (Total : rapport des totaux)" },
                 ],
             },
             {
                 label: "ETP", formula: total("etp"), value: round2(totals.etp), numFmt: NUM,
                 children: [
-                    {
-                        label: "Par mois", detail: "min(1, Σ H. théoriques ÷ Σ Référence 100%), arrondi à 2 décimales (feuille Tableau)",
-                        children: [
-                            { label: "Référence 100%", detail: "Mêmes segments de contrat, mais à 8h/jour (feuille Segments de contrat)" },
-                        ],
-                    },
+                    { label: "Par mois", detail: "min(1, Σ H. théoriques ÷ Σ Référence 100%), arrondi 0.01 (Tableau)" },
+                    { label: "Référence 100%", detail: "Mêmes segments de contrat à 8h/jour (Segments de contrat)" },
                     { label: "Total", detail: "Somme des ETP mensuels (pas une moyenne)" },
                 ],
             },
         ],
-        sheets: [tableau, parCollab, timesheets, segmentsSheet, feriesSheet],
+        sheets: [tableau, parCollab, timesheets, contrats, collaborateurs, segmentsSheet, feriesSheet],
     };
 }
