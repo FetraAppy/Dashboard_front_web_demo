@@ -1,5 +1,6 @@
 import { KpiExport } from "../excel/kpi-export.types";
 import { EmployeeScope, OperationnelExportFilters } from "./export-filters";
+import { exportSuiviMensuelDetaille } from "./kpis/suivi-mensuel-detaille";
 
 /**
  * Un exporteur par KPI du dashboard Opérationnel, chacun dans son propre fichier sous
@@ -12,4 +13,6 @@ export type OperationnelKpiExporter = (
 ) => Promise<KpiExport>;
 
 /** Clé = identifiant utilisé dans l'URL : GET /api/operationnel/export/:kpiId */
-export const OPERATIONNEL_KPI_EXPORTERS: Record<string, OperationnelKpiExporter> = {};
+export const OPERATIONNEL_KPI_EXPORTERS: Record<string, OperationnelKpiExporter> = {
+    "suivi-mensuel-detaille": exportSuiviMensuelDetaille,
+};

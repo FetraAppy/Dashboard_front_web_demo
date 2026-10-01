@@ -5,7 +5,7 @@ import { FiltreAffiche } from "../excel/kpi-export.types";
 // Filtres du dashboard Opérationnel, transmis par le frontend au moment du clic sur "Exporter" :
 // l'export doit refléter exactement la vue affichée (même collaborateur, sociétés, année, mois).
 
-const MOIS = [
+export const MOIS = [
     "janvier", "février", "mars", "avril", "mai", "juin",
     "juillet", "août", "septembre", "octobre", "novembre", "décembre",
 ];
