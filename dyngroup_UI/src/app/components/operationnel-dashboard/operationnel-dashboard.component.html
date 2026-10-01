@@ -313,10 +313,14 @@
                     <span *ngIf="filteredProductifHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
                   <td style="text-align: right;">
+                    <!-- Seuils fixes (100%/80%), pas la CIBLE dynamique (kpiObjectifProductivite) —
+                         demande utilisateur du 2026-09-23 : la CIBLE peut être faussée par un
+                         objectif CHF mal saisi (voir docs/operationnel-kpi-details.md), ce qui
+                         rendait ces couleurs peu fiables. -->
                     <span *ngIf="filteredRealHours[i] > 0" class="bdg"
-                          [class.bdg-pos]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= kpiObjectifProductivite"
-                          [class.bdg-neu]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= kpiObjectifProductivite * 0.93 && (filteredProductifHours[i] / filteredRealHours[i] * 100) < kpiObjectifProductivite"
-                          [class.bdg-neg]="(filteredProductifHours[i] / filteredRealHours[i] * 100) < kpiObjectifProductivite * 0.93">
+                          [class.bdg-pos]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= 100"
+                          [class.bdg-neu]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= 80 && (filteredProductifHours[i] / filteredRealHours[i] * 100) < 100"
+                          [class.bdg-neg]="(filteredProductifHours[i] / filteredRealHours[i] * 100) < 80">
                       {{ gen(filteredProductifHours[i] / filteredRealHours[i] * 100) }}%
                     </span>
                     <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
