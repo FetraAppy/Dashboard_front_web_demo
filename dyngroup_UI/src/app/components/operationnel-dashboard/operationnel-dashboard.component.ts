@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { Chart, registerables } from 'chart.js';
 import { environment } from '../../../environments/environment';
 import { FormatService } from '../../shared/format.service';
+import { KpiExportParams } from '../../shared/kpi-export.service';
+import { ExportButton } from '../../shared/export-button/export-button';
 
 Chart.register(...registerables);
 
@@ -15,7 +17,7 @@ const MS = ['Jan.', 'Fév.', 'Mars', 'Avr.', 'Mai', 'Juin', 'Juil.', 'Août', 'S
 @Component({
   selector: 'app-operationnel-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ExportButton],
   templateUrl: './operationnel-dashboard.component.html',
   styleUrl: './operationnel-dashboard.component.css'
 })

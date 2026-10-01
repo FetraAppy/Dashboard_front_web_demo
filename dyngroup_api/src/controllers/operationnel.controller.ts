@@ -1,300 +1,16 @@
 import { Request, Response } from "express";
 import { pool } from "../db/pool";
-
-// ---------------------------------------------------------------------------
-// Vaud (Lausanne) public holidays calculation
-// ---------------------------------------------------------------------------
-
-function computEaster(year: number): Date {
-    const a = year % 19;
-    const b = Math.floor(year / 100);
-    const c = year % 100;
-    const d = Math.floor(b / 4);
-    const e = b % 4;
-    const f = Math.floor((b + 8) / 25);
-    const g = Math.floor((b - f + 1) / 3);
-    const h = (19 * a + b - d - g + 15) % 30;
-    const i = Math.floor(c / 4);
-    const k = c % 4;
-    const l = (32 + 2 * e + 2 * i - h - k) % 7;
-    const m = Math.floor((a + 11 * h + 22 * l) / 451);
-    const month = Math.floor((h + l - 7 * m + 114) / 31);
-    const day = ((h + l - 7 * m + 114) % 31) + 1;
-    return new Date(year, month - 1, day);
-}
-
-function jeuneFederalMonday(year: number): Date {
-    // 3rd Sunday of September → following Monday
-    const sept1 = new Date(year, 8, 1);
-    const dow = sept1.getDay();
-    const daysToFirstSun = (7 - dow) % 7;
-    const firstSun = daysToFirstSun === 0 ? 1 : 1 + daysToFirstSun;
-    const thirdSun = firstSun + 14;
-    return new Date(year, 8, thirdSun + 1);
-}
-
-function addDays(date: Date, n: number): Date {
-    const d = new Date(date);
-    d.setDate(d.getDate() + n);
-    return d;
-}
-
-function isWeekend(d: Date): boolean {
-    const dow = d.getDay();
-    return dow === 0 || dow === 6;
-}
-
-/**
- * Dates des jours fériés vaudois d'une année, filtrées week-ends (et dates futures si
- * toDate=true, comportement par défaut — utilisé pour les graphiques/tableaux mensuels).
- * toDate=false renvoie les 9 jours fériés de l'année complète, sans coupure à aujourd'hui —
- * utilisé pour les totaux annuels du panneau Synthèse (H. théoriques annuelles, Jours
- * fériés calculés), qui doivent représenter l'année entière, pas "à ce jour" (vérifié
- * contre une feuille de référence RH : ces totaux couvrent les 12 mois même en cours d'année).
- * Base commune pour holidaysToMonthly (référence 1 personne) et computeTheoMensuelEmployee
- * (prorata réel par employé) — calcul de repli quand Odoo n'a pas le calendrier réel de l'année
- * (voir resolveOdooHolidayEntries plus bas). Vaud uniquement, pas de variante Genève en secours.
- */
-function getVaudHolidayDates(year: number, toDate: boolean = true): Date[] {
-    const paques = computEaster(year);
-    const now = new Date();
-
-    const holidays: Date[] = [
-        new Date(year, 0, 1),        // Nouvel An
-        new Date(year, 0, 2),        // Saint-Berthold
-        addDays(paques, -2),          // Vendredi Saint
-        addDays(paques, 1),           // Lundi de Pâques
-        addDays(paques, 39),          // Ascension
-        addDays(paques, 50),          // Lundi de Pentecôte
-        new Date(year, 7, 1),         // Fête nationale
-        jeuneFederalMonday(year),     // Lundi du Jeûne fédéral
-        new Date(year, 11, 25),       // Noël
-    ];
-
-    return holidays.filter(h => !isWeekend(h) && (!toDate || h <= now));
-}
-
-/** Convertit une liste de dates de jours fériés en répartition mensuelle (8h/jour). */
-function holidaysToMonthly(dates: Date[]): { parMois: number[]; totalHeures: number } {
-    const parMois = Array<number>(12).fill(0);
-    let totalHeures = 0;
-
-    for (const h of dates) {
-        parMois[h.getMonth()] += 8;
-        totalHeures += 8;
-    }
-
-    return { parMois, totalHeures };
-}
-
-// Canton de travail d'un employé — détermine quels jours fériés s'appliquent (voir
-// holidayDatesForCanton ci-dessous). Dérivé de hr_employee.work_location_name.
-type Canton = 'VD' | 'GE';
-
-/**
- * "Plan-les-Ouates" = Genève ; tout le reste (Lausanne, Echichens, ou lieu non renseigné) =
- * Vaud par défaut (canton majoritaire chez DYN — 27+5 employés sur 51 contre 9 à Genève).
- */
-function cantonFromWorkLocation(loc: string | null | undefined): Canton {
-    if (loc && loc.trim().toLowerCase() === 'plan-les-ouates') return 'GE';
-    return 'VD';
-}
-
-// Classification des jours fériés Odoo (resource.calendar.leaves) par canton. Tout libellé
-// absent des 2 listes ci-dessous est considéré commun aux deux cantons (fériés fédéraux/suisses
-// et jours offerts par l'entreprise, ex. "Nouvel An - jour offert par DYN"). Confirmé par
-// recoupement avec une feuille de référence RH (AGACHII Igor, basé à Lausanne/VD) : "Restauration
-// de la République" y est compté comme jour commun, pas comme un jour exclusivement genevois,
-// malgré son origine historique genevoise — décision utilisateur du 2026-09-09.
-const GENEVA_ONLY_HOLIDAY_NAMES = ['Jeûne genevois'];
-const VAUD_ONLY_HOLIDAY_NAMES = ['Lundi du Jeûne'];
-
-/**
- * Jours fériés réels de l'année, lus depuis le vrai calendrier Odoo
- * (staging.resource_calendar_leaves), dédupliqués par (date, libellé) — chaque jour férié existe
- * en 5 à 6 exemplaires identiques dans Odoo (imports répétés) — filtrés sur les congés globaux
- * uniquement (resource_id vide, hors congés individuels). Renvoie le nom ET la date de chaque
- * entrée : la classification par canton (holidayDatesForCanton) se fait ensuite, pas ici.
- * Renvoie null si la table n'existe pas encore, ou si Odoo n'a aucune donnée pour cette année
- * (constaté pour 2025 et les années antérieures — seules 2026/2027 sont paramétrées à ce jour) :
- * dans ce cas, l'appelant doit retomber sur getVaudHolidayDates() (calcul par formule, Vaud
- * uniquement — pas de variante Genève disponible en secours).
- */
-async function resolveOdooHolidayEntries(annee: number): Promise<{ date: Date; name: string }[] | null> {
-    try {
-        const res = await pool.query(
-            `SELECT DISTINCT date_from::date AS d, name
-             FROM staging.resource_calendar_leaves
-             WHERE (resource_id IS NULL OR resource_id::text IN ('', 'False'))
-               AND EXTRACT(YEAR FROM date_from::date) = $1`,
-            [annee]
-        );
-        if (res.rows.length === 0) return null;
-        return res.rows.map(r => ({ date: new Date(r.d), name: r.name }));
-    } catch (_) {
-        return null; // table pas encore extraite (avant premier run du DAG stage1_hr), fallback silencieux
-    }
-}
-
-/**
- * Filtre une liste d'entrées fériées Odoo pour un canton donné, et déduplique par date (un jour
- * comme le 31 décembre peut porter 2 libellés différents mais ne compte qu'une fois).
- */
-function holidayDatesForCanton(entries: { date: Date; name: string }[], canton: Canton): Date[] {
-    const relevant = entries.filter(e => {
-        if (GENEVA_ONLY_HOLIDAY_NAMES.includes(e.name)) return canton === 'GE';
-        if (VAUD_ONLY_HOLIDAY_NAMES.includes(e.name)) return canton === 'VD';
-        return true; // commun aux deux cantons
-    });
-    const seen = new Set<string>();
-    const result: Date[] = [];
-    for (const e of relevant) {
-        const key = e.date.toISOString().slice(0, 10);
-        if (!seen.has(key)) { seen.add(key); result.push(e.date); }
-    }
-    return result;
-}
-
-function computeMonthlyTheo(
-    year: number, feriesParMois: number[], toDate: boolean = true
-): { parMois: number[]; totalAnnuel: number } {
-    const now = new Date();
-    const isCurrentYear = now.getFullYear() === year;
-    const currentMonth = now.getMonth();
-    const today = now.getDate();
-
-    const parMois = Array<number>(12).fill(0);
-    let totalAnnuel = 0;
-
-    for (let m = 0; m < 12; m++) {
-        if (toDate && year > now.getFullYear()) break; // future year → all zeros
-        if (toDate && isCurrentYear && m > currentMonth) continue; // future month → 0
-
-        const daysInMonth = new Date(year, m + 1, 0).getDate();
-        const lastDay = (toDate && isCurrentYear && m === currentMonth) ? today : daysInMonth;
-        let workingDays = 0;
-        for (let d = 1; d <= lastDay; d++) {
-            const dow = new Date(year, m, d).getDay();
-            if (dow !== 0 && dow !== 6) workingDays++;
-        }
-        const theo = (workingDays * 8) - feriesParMois[m];
-        parMois[m] = theo;
-        totalAnnuel += theo;
-    }
-
-    return { parMois, totalAnnuel };
-}
-
-/**
- * Heures théoriques mensuelles par employé :
- * resource_calendar.hours_per_day × (jours ouvrés lun–ven − jours fériés vaudois),
- * avec prorata d'arrivée (first_contract_date) et de départ (departure_date),
- * et cutoff à la date du jour (mois courant / mois futurs).
- * Les fériés ne sont déduits que s'ils tombent dans la fenêtre où l'employé est
- * effectivement sous contrat ce mois-là (pas de déduction avant l'embauche/après le
- * départ) — contrairement à l'ancien calcul global qui appliquait un forfait plat
- * (8h × effectif brut) sans tenir compte du temps partiel ni des entrées/sorties.
- * toDate=false calcule l'année complète (mois futurs inclus, pas de coupure à aujourd'hui) —
- * utilisé pour "H. théoriques annuelles" du panneau Synthèse (voir getVaudHolidayDates).
- */
-function computeTheoMensuelEmployee(
-    emp: { hours_per_day: string | number | null; first_contract_date: string | null; departure_date: string | null },
-    year: number,
-    holidayDates: Date[],
-    toDate: boolean = true
-): number[] {
-    const hpd = parseFloat(String(emp.hours_per_day ?? '')) || 8;
-    const now = new Date();
-    const isCurrentYear = now.getFullYear() === year;
-
-    const parseDate = (s: string | null): Date | null => {
-        if (!s || s === 'False') return null;
-        const d = new Date(s);
-        return isNaN(d.getTime()) ? null : d;
-    };
-    const startDt = parseDate(emp.first_contract_date);
-    const endDt = parseDate(emp.departure_date);
-
-    const parMois = Array<number>(12).fill(0);
-    for (let m = 0; m < 12; m++) {
-        if (toDate && year > now.getFullYear()) break; // future year → all zeros
-        if (toDate && isCurrentYear && m > now.getMonth()) continue; // future month → 0
-
-        const daysInMonth = new Date(year, m + 1, 0).getDate();
-        const lastDay = (toDate && isCurrentYear && m === now.getMonth()) ? now.getDate() : daysInMonth;
-        const d1 = new Date(year, m, 1);
-        const d2 = new Date(year, m, lastDay);
-
-        if (startDt && startDt > d2) continue; // embauché après la fin du mois
-        if (endDt && endDt < d1) continue;     // parti avant le début du mois
-
-        const from = startDt && startDt > d1 ? startDt : d1;
-        const to = endDt && endDt < d2 ? endDt : d2;
-
-        let workingDays = 0;
-        for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-            const dow = d.getDay();
-            if (dow !== 0 && dow !== 6) workingDays++;
-        }
-        const feriesDansFenetre = holidayDates.filter(h => h >= from && h <= to).length;
-        parMois[m] = Math.round((workingDays - feriesDansFenetre) * hpd * 100) / 100;
-    }
-
-    return parMois;
-}
-
-interface ContractPeriod { start: Date; end: Date | null; hoursPerDay: number; }
-
-/**
- * Heures théoriques mensuelles par employé, en tenant compte de TOUS ses contrats
- * (pas seulement le contrat courant) — demande utilisateur du 2026-09-16.
- * Si le taux d'activité change en cours de mois (nouveau contrat), le mois est découpé
- * en sous-intervalles aux dates de changement de contrat ; chaque sous-intervalle est
- * calculé indépendamment (jours ouvrés − fériés dans CET intervalle) × hours_per_day du
- * contrat actif sur cet intervalle, puis les sous-intervalles sont additionnés.
- * Exemple : contrat A (90%, jusqu'au 15 fév) + contrat B (80%, dès le 16 fév) → théorique
- * de février = (jours ouvrés du 1-15 fév − fériés) × hpd_A + (jours ouvrés du 16-28 fév
- * − fériés) × hpd_B, plutôt qu'un seul hours_per_day appliqué au mois entier comme avant.
- */
-function computeTheoMensuelEmployeeContrats(
-    contracts: ContractPeriod[],
-    year: number,
-    holidayDates: Date[],
-    toDate: boolean = true
-): number[] {
-    const now = new Date();
-    const isCurrentYear = now.getFullYear() === year;
-    const parMois = Array<number>(12).fill(0);
-
-    for (let m = 0; m < 12; m++) {
-        if (toDate && year > now.getFullYear()) break; // future year → all zeros
-        if (toDate && isCurrentYear && m > now.getMonth()) continue; // future month → 0
-
-        const daysInMonth = new Date(year, m + 1, 0).getDate();
-        const lastDay = (toDate && isCurrentYear && m === now.getMonth()) ? now.getDate() : daysInMonth;
-        const monthStart = new Date(year, m, 1);
-        const monthEnd = new Date(year, m, lastDay);
-
-        let total = 0;
-        for (const c of contracts) {
-            const cEnd = c.end ?? monthEnd; // contrat encore actif → pas de borne de fin
-            const from = c.start > monthStart ? c.start : monthStart;
-            const to = cEnd < monthEnd ? cEnd : monthEnd;
-            if (from > to) continue; // ce contrat ne chevauche pas ce mois
-
-            let workingDays = 0;
-            for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-                const dow = d.getDay();
-                if (dow !== 0 && dow !== 6) workingDays++;
-            }
-            const feriesDansFenetre = holidayDates.filter(h => h >= from && h <= to).length;
-            total += (workingDays - feriesDansFenetre) * c.hoursPerDay;
-        }
-        parMois[m] = Math.round(total * 100) / 100;
-    }
-
-    return parMois;
-}
+import {
+    buildHolidaysByCanton,
+    holidaysToMonthly,
+    computeMonthlyTheo,
+    resolveOdooHolidayEntries,
+    loadCantonByEmployee,
+    loadContractsByEmployee,
+    theoPeriodsForEmployee,
+    computeTheoSegments,
+    monthlyTheoFromSegments,
+} from "../services/theo-hours";
 
 export async function getDashboardData(req: Request, res: Response) {
     try {
@@ -325,36 +41,8 @@ export async function getDashboardData(req: Request, res: Response) {
             resolveOdooHolidayEntries(annee)
         ]);
 
-        type HolidaySet = {
-            toDate: Date[];         // fériés ouvrés, "à ce jour" — graphiques/tableaux mensuels
-            fullYear: Date[];       // fériés ouvrés, année complète — H. théoriques annuelles
-            rawFullYear: Date[];    // TOUTES les dates officielles (même week-end) — Jours fériés calculés
-        };
-
-        /**
-         * Résout le jeu de jours fériés applicable à un canton donné : source réelle Odoo si
-         * disponible pour l'année demandée (dédupliquée, classée par canton), sinon calcul par
-         * formule (getVaudHolidayDates — Vaud uniquement, pas de variante Genève en secours).
-         * Voir docs/JOURS_FERIES_ODOO.md pour le détail de cette décision.
-         */
-        function resolveHolidaySet(canton: Canton): HolidaySet {
-            if (odooHolidays) {
-                const relevant = holidayDatesForCanton(odooHolidays, canton);
-                const weekdaysOnly = relevant.filter(h => !isWeekend(h));
-                return {
-                    toDate: weekdaysOnly.filter(h => h <= now),
-                    fullYear: weekdaysOnly,
-                    rawFullYear: relevant,
-                };
-            }
-            const fullYear = getVaudHolidayDates(annee, false);
-            return { toDate: getVaudHolidayDates(annee), fullYear, rawFullYear: fullYear };
-        }
-
-        const holidaysByCanton: Record<Canton, HolidaySet> = {
-            VD: resolveHolidaySet('VD'),
-            GE: resolveHolidaySet('GE'),
-        };
+        // Jours fériés par canton (calendrier Odoo, repli formule Vaud) — voir services/theo-hours.ts.
+        const holidaysByCanton = buildHolidaysByCanton(odooHolidays, annee, now);
         // Jeu par défaut (Vaud) pour les totaux company-wide qui n'ont pas de notion de canton
         // (référence ETP 1 employé plein temps, panneau Synthèse) — inchangé par rapport à avant.
         const holidayDates = holidaysByCanton.VD.toDate;
@@ -468,20 +156,8 @@ export async function getDashboardData(req: Request, res: Response) {
         }
 
         // Canton de travail par employé (Vaud/Genève), pour choisir le bon jeu de jours fériés
-        // (holidaysByCanton ci-dessus). Requête à part et défensive : work_location_name n'est
-        // pas encore extrait tant que stage1_hr n'a pas tourné avec ce nouveau champ — dans ce
-        // cas, tout le monde retombe sur Vaud (comportement identique à avant cette fonctionnalité).
-        const empCantonMap: Record<number, Canton> = {};
-        try {
-            const cantonRes = await pool.query(
-                `SELECT id, work_location_name FROM staging.hr_employee WHERE work_location_name IS NOT NULL`
-            );
-            cantonRes.rows.forEach(r => {
-                empCantonMap[r.id] = cantonFromWorkLocation(r.work_location_name);
-            });
-        } catch (_) {
-            // Colonne pas encore extraite (avant le prochain run de stage1_hr) — fallback Vaud
-        }
+        // (holidaysByCanton ci-dessus) — voir services/theo-hours.ts.
+        const empCantonMap = await loadCantonByEmployee();
 
         // Société par employé (filtre "Société", 2026-09-17, remplace le filtre Département).
         // Requête à part et défensive : staging.res_company n'existe pas tant que stage1_hr n'a
@@ -527,31 +203,8 @@ export async function getDashboardData(req: Request, res: Response) {
 
         // Historique COMPLET des contrats par employé (pas seulement le plus récent, contrairement
         // à empEtpMap ci-dessus) — sert à calculer l'heure théorique mensuelle en tenant compte
-        // d'un changement de taux d'activité en cours de mois (demande utilisateur du 2026-09-16).
-        // 'open' et 'close' inclus (un contrat clos reste un historique réel) ; 'draft'/'cancel'
-        // exclus (jamais entrés en vigueur).
-        const empContractsMap: Record<number, ContractPeriod[]> = {};
-        try {
-            const contractsRes = await pool.query(
-                `SELECT c.employee_id, c.date_start, c.date_end,
-                        COALESCE(rc.hours_per_day, 8) AS hours_per_day
-                 FROM staging.hr_contract c
-                 LEFT JOIN staging.resource_calendar rc ON c.resource_calendar_id = rc.id
-                 WHERE c.state IN ('open', 'close') AND c.date_start IS NOT NULL
-                 ORDER BY c.employee_id, c.date_start::date ASC`
-            );
-            contractsRes.rows.forEach(r => {
-                const empId = r.employee_id;
-                if (!empContractsMap[empId]) empContractsMap[empId] = [];
-                empContractsMap[empId].push({
-                    start: new Date(r.date_start),
-                    end: r.date_end ? new Date(r.date_end) : null,
-                    hoursPerDay: parseFloat(r.hours_per_day) || 8
-                });
-            });
-        } catch (_) {
-            // staging.hr_contract pas encore extrait — fallback sur computeTheoMensuelEmployee
-        }
+        // d'un changement de taux d'activité en cours de mois. Voir services/theo-hours.ts.
+        const empContractsMap = await loadContractsByEmployee();
 
         // Map employee ID to Name for quick lookup
         const empNameMap: Record<number, string> = {};
@@ -564,24 +217,20 @@ export async function getDashboardData(req: Request, res: Response) {
             const canton = empCantonMap[emp.id] || 'VD';
             const holidays = holidaysByCanton[canton];
             empNameMap[emp.id] = emp.name;
-            // Contrats connus pour cet employé → calcul par sous-intervalle (voir
-            // computeTheoMensuelEmployeeContrats). Repli sur l'ancien calcul à taux fixe si
-            // aucun contrat n'a pu être extrait pour cet employé.
-            const contracts = empContractsMap[emp.id];
+            // Périodes de contrat de l'employé (repli sur la fiche employé si aucun contrat
+            // extrait), découpées en segments mensuels — même calcul que l'export Excel du
+            // "Tableau de suivi mensuel détaillé", voir services/theo-hours.ts.
+            const { periods } = theoPeriodsForEmployee(empContractsMap[emp.id], emp, annee);
             const theoOf = (holidayDates: Date[], toDate: boolean) =>
-                contracts && contracts.length > 0
-                    ? computeTheoMensuelEmployeeContrats(contracts, annee, holidayDates, toDate)
-                    : computeTheoMensuelEmployee(emp, annee, holidayDates, toDate);
+                monthlyTheoFromSegments(computeTheoSegments(periods, annee, holidayDates, toDate));
             // Référence "100%" pour l'ETP (demande utilisateur du 2026-09-16) : même fenêtre de
             // présence (dates de contrat) et même canton que l'employé, mais SANS le taux
             // d'activité — hoursPerDay forcé à 8 sur chaque intervalle. ETP = théorique réel ÷
             // cette référence 100% (ex: 128h / 160h = 0.8 pour un contrat à 80%), pas
             // réalisé/théorique (qui reste le "Taux effort", une mesure différente).
+            const periods100 = periods.map(p => ({ ...p, hoursPerDay: 8 }));
             const theo100Of = (holidayDates: Date[], toDate: boolean) =>
-                contracts && contracts.length > 0
-                    ? computeTheoMensuelEmployeeContrats(
-                        contracts.map(c => ({ ...c, hoursPerDay: 8 })), annee, holidayDates, toDate)
-                    : computeTheoMensuelEmployee({ ...emp, hours_per_day: 8 }, annee, holidayDates, toDate);
+                monthlyTheoFromSegments(computeTheoSegments(periods100, annee, holidayDates, toDate));
             collab[emp.name] = {
                 real: Array(12).fill(0),
                 ca_real: Array(12).fill(0),
