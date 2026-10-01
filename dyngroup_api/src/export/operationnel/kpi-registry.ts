@@ -1,5 +1,6 @@
 import { KpiExport } from "../excel/kpi-export.types";
 import { EmployeeScope, OperationnelExportFilters } from "./export-filters";
+import { exportHeuresTheoriquesRealisees } from "./kpis/heures-theoriques-realisees";
 import { exportSuiviMensuelDetaille } from "./kpis/suivi-mensuel-detaille";
 
 /**
@@ -15,4 +16,5 @@ export type OperationnelKpiExporter = (
 /** Clé = identifiant utilisé dans l'URL : GET /api/operationnel/export/:kpiId */
 export const OPERATIONNEL_KPI_EXPORTERS: Record<string, OperationnelKpiExporter> = {
     "suivi-mensuel-detaille": exportSuiviMensuelDetaille,
+    "heures-theoriques-realisees": exportHeuresTheoriquesRealisees,
 };
