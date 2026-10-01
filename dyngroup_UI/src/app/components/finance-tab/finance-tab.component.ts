@@ -302,7 +302,10 @@ export class FinanceTabComponent implements OnInit, AfterViewInit, OnDestroy {
             { label: 'Réalisé', data: mkNull(this.kr15Series) as any, backgroundColor: C.fi } as any,
           ]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } }, scales: { y: { min: 0 } } }
+        // Pas de y.min:0 (même bug que KR14 avant correction) : un CA réalisé négatif — possible
+        // comptablement (avoir/note de crédit sur un compte classe 3 dépassant le CA du mois,
+        // voir docs/finance.md) — serait sinon rendu invisible, la barre étant coupée à 0.
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } } }
       }));
     }
 
