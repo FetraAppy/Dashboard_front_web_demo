@@ -257,7 +257,10 @@
     <div class="card-grid-2-1">
       <!-- Tableau détaillé -->
       <div class="card" style="padding: 20px;">
-        <div class="chart-title">Tableau de suivi mensuel détaillé</div>
+        <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+          <span>Tableau de suivi mensuel détaillé</span>
+          <app-export-button kpiId="suivi-mensuel-detaille" [params]="exportParams"></app-export-button>
+        </div>
         <div class="chart-subtitle">Heures, effort, budget et ressources par mois</div>
         <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
           Les heures de jours fériés ont été soustraites pour obtenir ces résultats.
