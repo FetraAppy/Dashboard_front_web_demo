@@ -316,10 +316,14 @@
                     <span *ngIf="filteredProductifHours[i] === 0" style="color: var(--text-muted);">—</span>
                   </td>
                   <td style="text-align: right;">
+                    <!-- Seuils fixes (100%/80%), pas la CIBLE dynamique (kpiObjectifProductivite) —
+                         demande utilisateur du 2026-09-23 : la CIBLE peut être faussée par un
+                         objectif CHF mal saisi (voir docs/operationnel-kpi-details.md), ce qui
+                         rendait ces couleurs peu fiables. -->
                     <span *ngIf="filteredRealHours[i] > 0" class="bdg"
-                          [class.bdg-pos]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= kpiObjectifProductivite"
-                          [class.bdg-neu]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= kpiObjectifProductivite * 0.93 && (filteredProductifHours[i] / filteredRealHours[i] * 100) < kpiObjectifProductivite"
-                          [class.bdg-neg]="(filteredProductifHours[i] / filteredRealHours[i] * 100) < kpiObjectifProductivite * 0.93">
+                          [class.bdg-pos]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= 100"
+                          [class.bdg-neu]="(filteredProductifHours[i] / filteredRealHours[i] * 100) >= 80 && (filteredProductifHours[i] / filteredRealHours[i] * 100) < 100"
+                          [class.bdg-neg]="(filteredProductifHours[i] / filteredRealHours[i] * 100) < 80">
                       {{ gen(filteredProductifHours[i] / filteredRealHours[i] * 100) }}%
                     </span>
                     <span *ngIf="filteredRealHours[i] === 0" style="color: var(--text-muted);">—</span>
@@ -335,8 +339,8 @@
                 <td style="text-align: right;">{{ formatHours(totalTheoHoursFullYear) }}</td>
                 <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
                 <td style="text-align: right;">
-                  <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
-                  <span *ngIf="totalRealHours === 0">—</span>
+                  <span *ngIf="totalRealHours > 0 && totalTheoHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
+                  <span *ngIf="totalRealHours === 0 || totalTheoHours === 0">—</span>
                 </td>
                 <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
                 <!-- <td style="text-align: right;">{{ formatNumber(totalCaBudget) }}</td> désactivé sur demande -->
@@ -411,6 +415,7 @@
         <div class="card">
           <div class="chart-title">Heures non facturables cumulées</div>
           <div class="chart-subtitle">Répartition par catégorie — {{ getFilterInfo() }}</div>
+          <div class="chart-subtitle"><strong>Total : {{ formatHours(nonFactTotal) }}</strong></div>
           <div class="chart-container" style="height: 230px;">
             <canvas #chNonFactCanvas></canvas>
           </div>
@@ -553,8 +558,8 @@
               <!-- <td style="text-align: right;">{{ formatHours(totalFeriesHours) }}</td> désactivé — jours fériés retirés du calcul -->
               <td style="text-align: right;">{{ totalRealHours > 0 ? formatHours(totalRealHours) : '—' }}</td>
               <td style="text-align: right;">
-                <span *ngIf="totalRealHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
-                <span *ngIf="totalRealHours === 0">—</span>
+                <span *ngIf="totalRealHours > 0 && totalTheoHours > 0">{{ gen(totalRealHours / totalTheoHours * 100) }}%</span>
+                <span *ngIf="totalRealHours === 0 || totalTheoHours === 0">—</span>
               </td>
               <td style="text-align: right;">{{ totalFactHours > 0 ? formatHours(totalFactHours) : '—' }}</td>
               <td style="text-align: right;">
