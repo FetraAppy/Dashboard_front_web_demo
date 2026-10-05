@@ -1,6 +1,8 @@
 import { KpiExport } from "../excel/kpi-export.types";
 import { EmployeeScope, OperationnelExportFilters } from "./export-filters";
+import { exportCaRealise } from "./kpis/ca-realise";
 import { exportHeuresTheoriquesRealisees } from "./kpis/heures-theoriques-realisees";
+import { exportObjectifProductivite } from "./kpis/objectif-productivite";
 import { exportSuiviMensuelDetaille } from "./kpis/suivi-mensuel-detaille";
 import { exportSuiviObjectifMensuel } from "./kpis/suivi-objectif-mensuel";
 
@@ -19,4 +21,6 @@ export const OPERATIONNEL_KPI_EXPORTERS: Record<string, OperationnelKpiExporter>
     "suivi-mensuel-detaille": exportSuiviMensuelDetaille,
     "heures-theoriques-realisees": exportHeuresTheoriquesRealisees,
     "suivi-objectif-mensuel": exportSuiviObjectifMensuel,
+    "ca-realise": exportCaRealise,
+    "objectif-productivite": exportObjectifProductivite,
 };

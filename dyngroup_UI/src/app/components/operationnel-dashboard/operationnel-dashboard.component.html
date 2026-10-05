@@ -136,6 +136,7 @@
       </div>
 
       <div class="kpi-card" style="border-left-color: var(--commercial);">
+        <app-export-button kpiId="ca-realise" [params]="exportParams" style="position: absolute; top: 12px; left: 12px;"></app-export-button>
         <div class="kpi-card-header">
           <span class="kpi-id">RÉALISÉ</span>
         </div>
@@ -172,6 +173,7 @@
       </div>
 
       <div class="kpi-card" style="border-left-color: var(--tax);">
+        <app-export-button kpiId="objectif-productivite" [params]="exportParams" style="position: absolute; top: 12px; left: 12px;"></app-export-button>
         <div class="kpi-card-header">
           <span class="kpi-id">CIBLE</span>
         </div>
@@ -426,7 +428,10 @@
         </div>
         -->
         <div class="card">
-          <div class="chart-title">Objectif de productivité</div>
+          <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+            <span>Objectif de productivité</span>
+            <app-export-button kpiId="objectif-productivite" [params]="exportParams"></app-export-button>
+          </div>
           <div style="text-align: center; margin: 20px 0 12px;">
             <div style="font-size: 36px; font-weight: 800;"
                  [style.color]="statutObjectifProductivite === 'atteint' ? '#16a34a' : statutObjectifProductivite === 'proche' ? '#ca8a04' : '#dc2626'">
