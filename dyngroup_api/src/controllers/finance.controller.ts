@@ -32,7 +32,6 @@ const KR_CONFIG: Record<string, KrThreshold> = {
     KR14: { target: null, thresholdType: "pct_below_budget", orange: 5, red: 10 },
     KR13: { target: null, thresholdType: "pct_above_budget", orange: 5, red: 10 },
     KR11: { target: 500000, thresholdType: "pct_below", orange: 5, red: 10 },
-    KR12: { target: 10, thresholdType: "days_above", orange: 1, red: 2 },
     KR20: { target: 45, thresholdType: "days_above", orange: 5, red: 15 },
     KR24: { target: 60, thresholdType: "pct_above", orange: 5, red: 10 },
 };
@@ -191,7 +190,7 @@ export async function getFinanceCompanies(_req: Request, res: Response) {
 
 // ---------------------------------------------------------------------------
 // GET /api/finance/dashboard?companies=1,2,3&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
-// Calcule à la volée les 7 KR Finance (KR15, KR14, KR11, KR20, KR13, KR12, KR24)
+// Calcule à la volée les 6 KR Finance (KR15, KR14, KR11, KR20, KR13, KR24)
 // depuis staging.*, filtrés par société et par période (KR20/KR24 exceptés :
 // ce sont des photos "à l'instant présent", non filtrables par période — voir
 // docs/finance.md).
@@ -202,7 +201,7 @@ export async function getFinanceDashboard(req: Request, res: Response) {
         const { dateFrom, dateTo } = parseDateRange(req);
 
         const kr_id_map: Record<string, KrEntry[]> = {
-            KR15: [], KR14: [], KR11: [], KR13: [], KR12: [], KR20: [], KR24: [],
+            KR15: [], KR14: [], KR11: [], KR13: [], KR20: [], KR24: [],
         };
 
         // --- Budget CA (KR15) — staging.account_report_budget_item, un montant par compte ×
@@ -367,24 +366,6 @@ export async function getFinanceDashboard(req: Request, res: Response) {
                 params
             );
             kr_id_map.KR11 = r.rows.map((row) => buildEntry(row.month, parseFloat(row.bank_movement_chf) || 0, KR_CONFIG.KR11));
-        }
-
-        // --- KR12 — Rapports livrés (clôture des projets) ---------------------------
-        {
-            const params: any[] = [dateFrom, dateTo];
-            let companyClause = "";
-            if (companies) { params.push(companies); companyClause = ` AND company_id = ANY($${params.length}::int[])`; }
-            const r = await pool.query(
-                `SELECT TO_CHAR(write_date::date, 'YYYY-MM') AS month,
-                        ROUND(AVG(write_date::date - COALESCE(date_start::date, create_date::date))::numeric, 2) AS avg_days
-                 FROM staging."project_project"
-                 WHERE active = FALSE
-                   AND write_date IS NOT NULL AND write_date <> '' AND write_date <> 'False'
-                   AND write_date::date BETWEEN $1 AND $2${companyClause}
-                 GROUP BY 1 ORDER BY 1`,
-                params
-            );
-            kr_id_map.KR12 = r.rows.map((row) => buildEntry(row.month, row.avg_days !== null ? parseFloat(row.avg_days) : null, KR_CONFIG.KR12));
         }
 
         // --- Factures clients postées, non payées, échues — base commune KR20/KR24 ---
