@@ -123,43 +123,6 @@ export async function getDashboardData(req: Request, res: Response) {
             employees.forEach(e => { empVacMap[e.id] = 176; });
         }
 
-        // Query per-employee average billing rate from sale order lines linked via timesheets
-        const empTarifMap: Record<number, number> = {};
-        try {
-            const tarifRes = await pool.query(
-                `SELECT
-                   aal.employee_id,
-                   ROUND(SUM(aal.unit_amount * sol.price_unit) / NULLIF(SUM(aal.unit_amount), 0), 2) AS tarif_moyen
-                 FROM staging.account_analytic_line aal
-                 JOIN staging.sale_order_line sol ON aal.so_line = sol.id
-                 WHERE aal.employee_id IS NOT NULL
-                   AND aal.so_line IS NOT NULL
-                   AND aal.date IS NOT NULL
-                   AND EXTRACT(YEAR FROM aal.date::date) = $1
-                   AND aal.unit_amount > 0
-                 GROUP BY aal.employee_id`,
-                [annee]
-            );
-            tarifRes.rows.forEach(r => {
-                empTarifMap[r.employee_id] = parseFloat(r.tarif_moyen) || 0;
-            });
-        } catch (_) {
-            // Table may not exist yet or so_line not extracted yet
-        }
-
-        // Query xx_hourly_price from hr_employee (fallback billing rate)
-        const empPriceMap: Record<number, number> = {};
-        try {
-            const priceRes = await pool.query(
-                `SELECT id, xx_hourly_price FROM staging.hr_employee WHERE xx_hourly_price IS NOT NULL AND xx_hourly_price > 0`
-            );
-            priceRes.rows.forEach(r => {
-                empPriceMap[r.id] = parseFloat(r.xx_hourly_price) || 0;
-            });
-        } catch (_) {
-            // Table may not have the field yet
-        }
-
         // Canton de travail par employé (Vaud/Genève), pour choisir le bon jeu de jours fériés
         // (holidaysByCanton ci-dessus) — voir services/theo-hours.ts.
         const empCantonMap = await loadCantonByEmployee();
@@ -268,13 +231,6 @@ export async function getDashboardData(req: Request, res: Response) {
                 // plus bas. Une nouvelle catégorie ajoutée dans Odoo (nouveau type de congé, nouvelle
                 // tâche sous "CLIENT DYN SA - INTERNE") apparaît automatiquement, sans code à changer.
                 non_fact: {} as Record<string, number[]>,
-                // Priorité à xx_hourly_price (empPriceMap) : c'est le tarif de référence RH
-                // saisi sur la fiche employé Odoo ("Hourly Price"), pas la moyenne des prix de
-                // vente réels (empTarifMap) qui varie selon les mandats facturés. Vérifié sur
-                // AGACHII Igor : xx_hourly_price=180 correspond exactement au "CA Brut" de
-                // référence (981h × 180 = 176'580), alors que sa moyenne de vente réelle
-                // (560.70) n'a aucun rapport avec ce total.
-                tarif_moyen: empPriceMap[emp.id] || empTarifMap[emp.id] || parseFloat(synthese.tarif_horaire_chf) || 180,
                 etp: empEtpMap[emp.id] || 1,
                 department: emp.department_name || null,
                 company: empCompanyMap[emp.id] || null
@@ -509,32 +465,31 @@ export async function getDashboardData(req: Request, res: Response) {
             productifRes = null; // colonne productivity pas encore extraite — fallback plus bas
         }
 
-        // 12. Tarif horaire moyen par employé/mois, à partir des timesheets réels
-        // (x_studio_tarif_horaire, un champ Studio dédié — pas empTarifMap/empPriceMap, qui
-        // servent de repli si aucune donnée mensuelle n'existe). CA réalisé = heures réalisées
-        // × cette moyenne mensuelle (demande utilisateur du 2026-09-11).
-        // Défensif : colonne pas encore extraite tant que stage1_project n'a pas tourné avec ce
-        // nouveau champ (voir kpi_fields.py).
-        let tarifMoisRes: { rows: { employee_id: number; mois: number; tarif_moyen: string }[] } | null = null;
+        // 12. Tarif horaire par employé/mois, saisi dans l'onglet "Objectif" de la fiche employé
+        // (x_suivi_annuel_employe.x_studio_tarif_horaire, même ligne que Objectif CHF) — remplace
+        // la moyenne des tarifs des timesheets (demande utilisateur du 2026-10-05). Pas de repli :
+        // ligne absente, tarif vide ou 0 → tarif 0 → CA réalisé 0 pour ce mois. MAX si plusieurs
+        // lignes pour le même mois. Casté via texte : la colonne reste TEXT tant que le full
+        // refresh hebdomadaire de stage1_hr ne l'a pas retypée. Défensif : colonne pas encore
+        // extraite → tous les tarifs à 0.
+        const tarifMoisMap: Record<string, number> = {};
         try {
-            tarifMoisRes = await pool.query(
-                `SELECT employee_id, EXTRACT(MONTH FROM date::date)::int AS mois,
-                        AVG(x_studio_tarif_horaire) AS tarif_moyen
-                 FROM staging.account_analytic_line
-                 WHERE date IS NOT NULL AND employee_id IS NOT NULL
-                   AND EXTRACT(YEAR FROM date::date) = $1
-                   AND x_studio_tarif_horaire > 0
-                 GROUP BY employee_id, mois`,
+            const tarifMoisRes = await pool.query(
+                `SELECT x_studio_employ AS employee_id,
+                        EXTRACT(MONTH FROM x_studio_mois_objectif::date)::int AS mois,
+                        MAX(COALESCE(NULLIF(TRIM(x_studio_tarif_horaire::text), '')::numeric, 0)) AS tarif
+                 FROM staging.x_suivi_annuel_employe
+                 WHERE x_active = true AND x_studio_employ IS NOT NULL
+                   AND x_studio_mois_objectif IS NOT NULL
+                   AND EXTRACT(YEAR FROM x_studio_mois_objectif::date) = $1
+                 GROUP BY x_studio_employ, mois`,
                 [annee]
             );
-        } catch (_) {
-            tarifMoisRes = null; // colonne pas encore extraite — repli sur tarif_moyen par employé
-        }
-        const tarifMoisMap: Record<string, number> = {};
-        if (tarifMoisRes) {
             tarifMoisRes.rows.forEach(r => {
-                tarifMoisMap[`${r.employee_id}_${r.mois}`] = parseFloat(r.tarif_moyen) || 0;
+                tarifMoisMap[`${r.employee_id}_${r.mois}`] = parseFloat(r.tarif) || 0;
             });
+        } catch (e: any) {
+            console.warn('[operationnel] tarif horaire (onglet Objectif) indisponible, CA réalisé à 0 :', e.message);
         }
 
         // 13. CA objectif CHF par employé/mois — onglet "Objectif" de la fiche employé Odoo
@@ -607,27 +562,21 @@ export async function getDashboardData(req: Request, res: Response) {
         });
 
         // CA réalisé = heures PRODUCTIVES (account_analytic_line.productivity = true, pas
-        // toutes les heures réalisées) × tarif horaire moyen du mois, calculé à partir des
-        // vraies lignes de temps (x_studio_tarif_horaire). Repli sur le tarif de référence de
-        // l'employé (tarif_moyen — xx_hourly_price ou moyenne de vente) si aucune ligne de ce
-        // mois n'a de tarif renseigné (mois sans activité, ou colonne pas encore extraite).
-        // Demande utilisateur du 2026-09-16 : remplace le calcul précédent (toutes les heures
-        // réalisées × tarif), qui surestimait le CA en comptant aussi les heures non productives.
+        // toutes les heures réalisées) × tarif horaire du mois saisi dans l'onglet "Objectif"
+        // de la fiche employé (requête 12). Sans tarif pour le mois (absent, vide ou 0), le CA
+        // réalisé du mois vaut 0 — plus de repli sur un tarif de référence (2026-10-05).
         employees.forEach(emp => {
             const c = collab[emp.name];
             for (let m = 0; m < 12; m++) {
-                const tarifMois = tarifMoisMap[`${emp.id}_${m + 1}`];
-                const tarif = tarifMois || c.tarif_moyen;
+                const tarif = tarifMoisMap[`${emp.id}_${m + 1}`] || 0;
                 c.ca_real[m] = Math.round(c.productif[m] * tarif * 100) / 100;
             }
             // Tarif horaire "effectif" de l'employé sur l'année = CA réalisé total ÷ heures
-            // productives totales — reconstitue le vrai mélange des tarifs mensuels appliqués
-            // ci-dessus (peut varier d'un mois à l'autre), contrairement à tarif_moyen qui n'est
-            // qu'un tarif de référence statique (xx_hourly_price). Repli sur tarif_moyen si
-            // l'employé n'a aucune heure productive cette année.
+            // productives totales (moyenne des tarifs mensuels pondérée par les heures, un mois
+            // sans tarif comptant à 0). 0 si aucune heure productive cette année.
             const totalCaEmp = c.ca_real.reduce((s: number, v: number) => s + v, 0);
             const totalHeuresEmp = c.productif.reduce((s: number, v: number) => s + v, 0);
-            c.tarif_effectif = totalHeuresEmp > 0 ? Math.round((totalCaEmp / totalHeuresEmp) * 100) / 100 : c.tarif_moyen;
+            c.tarif_effectif = totalHeuresEmp > 0 ? Math.round((totalCaEmp / totalHeuresEmp) * 100) / 100 : 0;
         });
 
         // CA objectif CHF (onglet "Objectif" de la fiche employé) — voir requête 13 ci-dessus.
@@ -695,27 +644,18 @@ export async function getDashboardData(req: Request, res: Response) {
         });
 
         // Tarif horaire moyen global = CA réalisé total ÷ heures PRODUCTIVES totales (moyenne
-        // pondérée par les heures qui génèrent effectivement ce CA depuis le 2026-09-16) —
-        // cohérent avec le CA réalisé effectivement affiché (voir tarif_effectif ci-dessus),
-        // plutôt qu'une simple moyenne non pondérée des tarifs de référence par employé qui
-        // ignorait leur volume d'heures respectif. Diviser par les heures réalisées (toutes,
-        // pas seulement productives) donnerait un tarif artificiellement dilué. Repli sur
-        // l'ancienne moyenne (xx_hourly_price → prix de vente moyen → défaut) si personne n'a
-        // encore d'heures productives sur l'année.
+        // pondérée par les heures qui génèrent effectivement ce CA) — cohérent avec le CA réalisé
+        // affiché (voir tarif_effectif ci-dessus). 0 si personne n'a d'heures productives sur
+        // l'année : plus de repli sur un tarif de référence (2026-10-05).
         let totalCaRealAnnuel = 0;
         let totalHeuresRealAnnuel = 0;
         Object.values(collab).forEach((c: any) => {
             totalCaRealAnnuel += c.ca_real.reduce((s: number, v: number) => s + v, 0);
             totalHeuresRealAnnuel += c.productif.reduce((s: number, v: number) => s + v, 0);
         });
-        const tarifValues = employees
-            .map(emp => empPriceMap[emp.id] || empTarifMap[emp.id] || 0)
-            .filter(v => v > 0);
         const tarifGlobal = totalHeuresRealAnnuel > 0
             ? Math.round((totalCaRealAnnuel / totalHeuresRealAnnuel) * 100) / 100
-            : (tarifValues.length > 0
-                ? Math.round(tarifValues.reduce((s, v) => s + v, 0) / tarifValues.length)
-                : (parseFloat(synthese.tarif_horaire_chf) || 180));
+            : 0;
 
         // Compute holidays & theoretical hours for the year — dérivé des dates déjà résolues
         // plus haut (Odoo si disponible, sinon formule), pas d'un recalcul indépendant.

@@ -63,7 +63,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   etpMonthly: number[] = [];
 
   // Synthesis parameters
-  tarifHoraire = 180;
+  tarifHoraire = 0;
   devise = 'CHF';
   heuresTheoAnnuelles = 0;
   heuresProductives = 0;
@@ -219,7 +219,8 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
         if (this.globalData.synthese) {
           const s = this.globalData.synthese;
-          this.tarifHoraire = parseFloat(s.tarif_horaire_moyen) || parseFloat(s.tarif_horaire_chf) || 180;
+          // Tarif = CA réalisé ÷ h. productives (API) ; 0 reste 0, pas de repli sur 180.
+          this.tarifHoraire = parseFloat(s.tarif_horaire_moyen) || 0;
           this.devise = s.devise || 'CHF';
         }
       }
@@ -529,7 +530,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.caBudget = Array(12).fill(0);
       this.caObjectifChf = Array(12).fill(0);
 
-      this.tarifHoraire = this.globalData.synthese?.tarif_horaire_moyen || parseFloat(this.globalData.synthese?.tarif_horaire_chf) || 180;
+      this.tarifHoraire = parseFloat(this.globalData.synthese?.tarif_horaire_moyen) || 0;
 
       const collabNames = collabNamesDept;
       if (collabNames.length > 0) {
@@ -606,10 +607,10 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
       this.caBudget = c.ca_bud ? [...c.ca_bud] : (this.globalData.ca_bud || []);
       this.caObjectifChf = c.ca_objectif_chf ? [...c.ca_objectif_chf] : Array(12).fill(0);
       caBudgetAnnuelCalcule = c.ca_budget_annuel || parseFloat(this.globalData.synthese?.ca_budget_annuel_chf) || 0;
-      // tarif_effectif = CA réalisé ÷ heures réalisées de l'employé (moyenne pondérée réelle,
-      // voir backend) — plus représentatif que tarif_moyen (tarif de référence statique) quand
-      // plusieurs tarifs mensuels différents ont été appliqués dans l'année.
-      if (c.tarif_effectif) this.tarifHoraire = c.tarif_effectif;
+      // tarif_effectif = CA réalisé ÷ heures productives de l'employé (moyenne des tarifs
+      // mensuels de l'onglet "Objectif", pondérée par les heures — voir backend). 0 reste 0 :
+      // avant, un tarif à 0 gardait à tort le tarif global affiché.
+      this.tarifHoraire = parseFloat(c.tarif_effectif) || 0;
       // ETP mensuel = H.théoriques réelles (contrat) ÷ H.théoriques référence 100% — même
       // formule que la vue "Tous collaborateurs" (voir ci-dessus). Plafonné à 1. Année complète
       // (theo100FullYear), cohérent avec this.theoHours qui est lui-même déjà en année complète.
