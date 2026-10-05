@@ -465,7 +465,10 @@
 
     <!-- Tableau Variable & Vacances -->
     <div class="card" style="margin-top: 24px; margin-bottom: 24px;">
-      <div class="chart-title">Suivi heure variable &amp; Vacances</div>
+      <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+        <span>Suivi heure variable &amp; Vacances</span>
+        <app-export-button kpiId="suivi-heure-variable-vacances" [params]="exportParams"></app-export-button>
+      </div>
       <div class="chart-subtitle">Absences, soldes de vacances restants et écarts horaires</div>
       
       <div class="table-wrapper">
