@@ -6,6 +6,7 @@ import { exportHeuresTheoriquesRealisees } from "./kpis/heures-theoriques-realis
 import { exportObjectifFacturation } from "./kpis/objectif-facturation";
 import { exportObjectifProductivite } from "./kpis/objectif-productivite";
 import { exportProductiviteMensuelle } from "./kpis/productivite-mensuelle";
+import { exportSuiviHeureVariableVacances } from "./kpis/suivi-heure-variable-vacances";
 import { exportSuiviMensuelDetaille } from "./kpis/suivi-mensuel-detaille";
 import { exportSuiviObjectifMensuel } from "./kpis/suivi-objectif-mensuel";
 
@@ -29,4 +30,5 @@ export const OPERATIONNEL_KPI_EXPORTERS: Record<string, OperationnelKpiExporter>
     "objectif-productivite": exportObjectifProductivite,
     "productivite-mensuelle": exportProductiviteMensuelle,
     "heures-non-facturables": exportHeuresNonFacturables,
+    "suivi-heure-variable-vacances": exportSuiviHeureVariableVacances,
 };
