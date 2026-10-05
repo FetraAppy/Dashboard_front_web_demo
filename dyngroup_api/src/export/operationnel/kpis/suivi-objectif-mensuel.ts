@@ -5,11 +5,12 @@ import { EmployeeScope, MOIS, OperationnelExportFilters } from "../export-filter
 
 // Export du graphique "Suivi de l'objectif mensuel" (onglet Indicateurs Clés).
 //   CA réalisé  = heures productives × tarif horaire du mois   (operationnel.controller.ts)
+//   Tarif       = x_suivi_annuel_employe.x_studio_tarif_horaire (onglet "Objectif"), vide = 0
 //   Objectif    = x_suivi_annuel_employe.x_studio_objectif_chf
 //   Écart       = CA réalisé − Objectif ; Cumul = somme des écarts depuis janvier
 // Chaîne de calcul, par formules Excel :
-//   Timesheets (heures productives + tarif horaire du mois) + Objectifs → Par collaborateur
-//     → Suivi objectif mensuel.
+//   Timesheets (heures productives) + Objectifs (tarif horaire et objectif du mois)
+//     → Par collaborateur → Suivi objectif mensuel.
 // Toute l'année est lue (pas seulement le mois filtré) car le cumul part toujours de janvier ;
 // la feuille de suivi n'affiche ensuite que les mois du filtre.
 // Les textes du classeur sont destinés au client : pas de noms de champs Odoo.
@@ -17,7 +18,6 @@ import { EmployeeScope, MOIS, OperationnelExportFilters } from "../export-filter
 const CHF = "#,##0.00";
 const HEURES = "0.00";
 const DATE = "dd.mm.yyyy";
-const TARIF_PAR_DEFAUT = 180;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -35,27 +35,25 @@ async function queryOrEmpty(sql: string, params: unknown[]) {
 }
 
 /**
- * Toutes les lignes de feuille de temps de l'année : le dashboard en tire les heures productives
- * (hors jours fériés fictifs) ET le tarif horaire du mois (moyenne sur toutes les lignes avec un
- * tarif, productives ou non). Sans la colonne tarif (pas encore extraite), on relit sans elle.
+ * Lignes de l'onglet "Objectif" de la fiche employé, avec le tarif horaire du mois (vide → 0,
+ * casté via texte comme dans le dashboard). Sans la colonne tarif (pas encore extraite), on relit
+ * sans elle : tous les tarifs valent alors 0, comme dans le dashboard.
  */
-async function loadTimesheets(ids: number[], debut: string, fin: string) {
+async function loadObjectifs(ids: number[], debut: string, fin: string) {
     const sql = (tarif: string) =>
-        `SELECT TO_CHAR(aal.date::date, 'YYYY-MM-DD') AS date, aal.employee_id, aal.name AS libelle,
-                aal.unit_amount AS heures, aal.productivity, ${tarif} AS tarif,
-                (aal.name LIKE 'Congé (%' AND aal.amount = 0) AS ferie_fictif,
-                pp.name AS projet, pt.name AS tache
-         FROM staging.account_analytic_line aal
-         LEFT JOIN staging.project_project pp ON pp.id = aal.project_id
-         LEFT JOIN staging.project_task pt ON pt.id = aal.task_id
-         WHERE aal.employee_id = ANY($1::int[])
-           AND aal.date::date BETWEEN $2::date AND $3::date
-         ORDER BY aal.date::date, aal.employee_id, aal.id`;
+        `SELECT x_studio_employ AS employee_id, TO_CHAR(x_studio_mois_objectif::date, 'YYYY-MM-DD') AS date,
+                x_studio_objectif AS heures, ${tarif} AS tarif, x_studio_objectif_chf AS objectif
+         FROM staging.x_suivi_annuel_employe
+         WHERE x_active = true AND x_studio_employ = ANY($1::int[])
+           AND x_studio_mois_objectif::date BETWEEN $2::date AND $3::date
+         ORDER BY x_studio_mois_objectif::date, x_studio_employ`;
     try {
-        return (await pool.query(sql("aal.x_studio_tarif_horaire"), [ids, debut, fin])).rows;
+        return (await pool.query(
+            sql("COALESCE(NULLIF(TRIM(x_studio_tarif_horaire::text), '')::numeric, 0)"), [ids, debut, fin]
+        )).rows;
     } catch (e: any) {
         console.warn("[export suivi-objectif-mensuel] tarif horaire non disponible :", e.message);
-        return (await pool.query(sql("NULL::numeric"), [ids, debut, fin])).rows;
+        return queryOrEmpty(sql("0"), [ids, debut, fin]);
     }
 }
 
@@ -72,51 +70,29 @@ export async function exportSuiviObjectifMensuel(
     const cle = (employeeId: number, mois: number) => `${employeeId}|${mois}`;
 
     // --- Requêtes (mêmes conditions que le dashboard) ---------------------------------------
-    const [lignes, prixFiche, prixVente, synthese, lignesObjectif] = await Promise.all([
-        loadTimesheets(ids, debutAnnee, finAnnee),
-        // Tarif de référence de l'employé, utilisé par le dashboard seulement si aucune ligne du
-        // mois n'a de tarif : fiche employé, sinon prix de vente moyen, sinon synthèse, sinon 180.
-        queryOrEmpty(
-            `SELECT id AS employee_id, xx_hourly_price AS tarif
-             FROM staging.hr_employee WHERE id = ANY($1::int[]) AND xx_hourly_price > 0`,
-            [ids]
-        ),
-        queryOrEmpty(
-            `SELECT aal.employee_id,
-                    ROUND(SUM(aal.unit_amount * sol.price_unit) / NULLIF(SUM(aal.unit_amount), 0), 2) AS tarif
+    const [lignes, lignesObjectif] = await Promise.all([
+        // Heures productives, ligne par ligne, hors jours fériés fictifs d'Odoo.
+        pool.query(
+            `SELECT TO_CHAR(aal.date::date, 'YYYY-MM-DD') AS date, aal.employee_id, aal.name AS libelle,
+                    aal.unit_amount AS heures, pp.name AS projet, pt.name AS tache
              FROM staging.account_analytic_line aal
-             JOIN staging.sale_order_line sol ON aal.so_line = sol.id
-             WHERE aal.employee_id = ANY($1::int[]) AND aal.date::date BETWEEN $2::date AND $3::date
-               AND aal.unit_amount > 0
-             GROUP BY aal.employee_id`,
+             LEFT JOIN staging.project_project pp ON pp.id = aal.project_id
+             LEFT JOIN staging.project_task pt ON pt.id = aal.task_id
+             WHERE aal.employee_id = ANY($1::int[])
+               AND aal.date::date BETWEEN $2::date AND $3::date
+               AND NOT (aal.name LIKE 'Congé (%' AND aal.amount = 0)
+               AND aal.productivity = true
+             ORDER BY aal.date::date, aal.employee_id, aal.id`,
             [ids, debutAnnee, finAnnee]
-        ),
-        queryOrEmpty(`SELECT tarif_horaire_chf AS tarif FROM kpi.operationnel_synthese_annuelle WHERE annee = $1 LIMIT 1`, [annee]),
-        // Objectifs saisis dans l'onglet "Objectif" de la fiche employé.
-        queryOrEmpty(
-            `SELECT x_studio_employ AS employee_id, TO_CHAR(x_studio_mois_objectif::date, 'YYYY-MM-DD') AS date,
-                    x_studio_objectif_chf AS objectif
-             FROM staging.x_suivi_annuel_employe
-             WHERE x_active = true AND x_studio_employ = ANY($1::int[])
-               AND x_studio_mois_objectif::date BETWEEN $2::date AND $3::date
-             ORDER BY x_studio_mois_objectif::date, x_studio_employ`,
-            [ids, debutAnnee, finAnnee]
-        ),
+        ).then(r => r.rows),
+        loadObjectifs(ids, debutAnnee, finAnnee),
     ]);
 
-    const tarifSynthese = parseFloat(synthese[0]?.tarif) || 0;
-    const tarifReference = (employeeId: number) =>
-        parseFloat(prixFiche.find(r => r.employee_id === employeeId)?.tarif)
-        || parseFloat(prixVente.find(r => r.employee_id === employeeId)?.tarif)
-        || tarifSynthese
-        || TARIF_PAR_DEFAUT;
-
-    // --- Feuille "Timesheets" : toutes les lignes de l'année ---------------------------------
+    // --- Feuille "Timesheets" : heures productives de l'année ---------------------------------
     const heuresParCollabMois = new Map<string, number>();
-    const tarifsParCollabMois = new Map<string, number[]>();
     const timesheets: DataSheet = {
         name: "Timesheets",
-        description: "Lignes de feuille de temps de l'année : les heures productives donnent le CA, les tarifs horaires donnent le tarif du mois",
+        description: "Lignes de feuille de temps productives de l'année (hors « Congé (…) » à 0 CHF), qui donnent les heures du CA réalisé",
         columns: [
             { header: "Date", key: "date", width: 12, numFmt: DATE },
             { header: "Mois", key: "mois", width: 7 },
@@ -126,9 +102,6 @@ export async function exportSuiviObjectifMensuel(
             { header: "Tâche", key: "tache", width: 34 },
             { header: "Libellé", key: "libelle", width: 50 },
             { header: "Heures", key: "heures", width: 9, numFmt: HEURES },
-            { header: "Productivité", key: "productivite", width: 13 },
-            { header: "Comptée dans les heures", key: "comptee", width: 22 },
-            { header: "Tarif horaire", key: "tarif", width: 13, numFmt: CHF },
         ],
         rows: [],
     };
@@ -137,12 +110,8 @@ export async function exportSuiviObjectifMensuel(
         if (!collab) return;
         const [an, mois, jour] = l.date.split("-").map(Number);
         const heures = parseFloat(l.heures) || 0;
-        const productive = l.productivity === true;
-        const comptee = !l.ferie_fictif;
-        const tarif = parseFloat(l.tarif) || 0;
         const k = cle(collab.id, mois);
-        if (productive && comptee) heuresParCollabMois.set(k, (heuresParCollabMois.get(k) ?? 0) + heures);
-        if (tarif > 0) tarifsParCollabMois.set(k, [...(tarifsParCollabMois.get(k) ?? []), tarif]);
+        heuresParCollabMois.set(k, (heuresParCollabMois.get(k) ?? 0) + heures);
         timesheets.rows.push({
             date: new Date(Date.UTC(an, mois - 1, jour)),
             mois,
@@ -152,23 +121,22 @@ export async function exportSuiviObjectifMensuel(
             tache: l.tache ?? "",
             libelle: l.libelle ?? "",
             heures,
-            productivite: productive ? "Oui" : "Non",
-            // Les « Congé (…) » à 0 CHF sont des jours fériés générés par Odoo, pas du travail.
-            comptee: comptee ? "Oui" : "Non",
-            tarif: tarif || null,
         });
     });
 
-    // --- Feuille "Objectifs" --------------------------------------------------------------
+    // --- Feuille "Objectifs" : tarif horaire et objectif CHF du mois -------------------------
     const objectifParCollabMois = new Map<string, number>();
+    const tarifParCollabMois = new Map<string, number>();
     const objectifs: DataSheet = {
         name: "Objectifs",
-        description: "Objectif CHF saisi par collaborateur et par mois (fiche employé Odoo, onglet « Objectif »)",
+        description: "Onglet « Objectif » de la fiche employé : tarif horaire, objectif heures et objectif CHF de chaque mois",
         columns: [
             { header: "Mois objectif", key: "date", width: 14, numFmt: DATE },
             { header: "Mois", key: "mois", width: 7 },
             { header: "Collaborateur", key: "collab", width: 28 },
             { header: "Société", key: "societe", width: 24 },
+            { header: "Tarif horaire", key: "tarif", width: 13, numFmt: CHF },
+            { header: "Objectif heures", key: "heures", width: 15, numFmt: HEURES },
             { header: "Objectif CHF", key: "objectif", width: 14, numFmt: CHF },
         ],
         rows: [],
@@ -177,13 +145,19 @@ export async function exportSuiviObjectifMensuel(
         const collab = collabParId.get(l.employee_id);
         if (!collab) return;
         const [an, mois, jour] = l.date.split("-").map(Number);
+        const k = cle(collab.id, mois);
         const objectif = parseFloat(l.objectif) || 0;
-        objectifParCollabMois.set(cle(collab.id, mois), (objectifParCollabMois.get(cle(collab.id, mois)) ?? 0) + objectif);
+        // Vide ou 0 → 0 ; plusieurs lignes pour le même mois → le plus élevé (comme le dashboard).
+        const tarif = parseFloat(l.tarif) || 0;
+        objectifParCollabMois.set(k, (objectifParCollabMois.get(k) ?? 0) + objectif);
+        tarifParCollabMois.set(k, Math.max(tarifParCollabMois.get(k) ?? 0, tarif));
         objectifs.rows.push({
             date: new Date(Date.UTC(an, mois - 1, jour)),
             mois,
             collab: collab.name,
             societe: collab.company ?? "",
+            tarif,
+            heures: parseFloat(l.heures) || 0,
             objectif,
         });
     });
@@ -205,21 +179,20 @@ export async function exportSuiviObjectifMensuel(
     };
     const caParMois = douzeMois.map(() => 0);
     const objectifParMois = douzeMois.map(() => 0);
-    let moisAuTarifFiche = 0;
+    let moisAvecTarif = 0;
+    let moisHeuresSansTarif = 0;
 
     [...scope.employees].sort((a, b) => a.name.localeCompare(b.name)).forEach(collab => {
-        const reference = tarifReference(collab.id);
         douzeMois.forEach(mois => {
             const ligne = parCollab.rows.length;
             const colonne = (key: string) => cellRef(parCollab, key, ligne);
-            const parCollabMois = `${columnRange(timesheets, "collab")},${colonne("collab")},${columnRange(timesheets, "mois")},${colonne("mois")}`;
-            const avecTarif = `${columnRange(timesheets, "tarif")},">0"`;
+            const filtre = (feuille: DataSheet) =>
+                `${columnRange(feuille, "collab")},${colonne("collab")},${columnRange(feuille, "mois")},${colonne("mois")}`;
 
             const heures = heuresParCollabMois.get(cle(collab.id, mois)) ?? 0;
-            const tarifs = tarifsParCollabMois.get(cle(collab.id, mois)) ?? [];
-            const tarifMois = tarifs.length ? tarifs.reduce((s, t) => s + t, 0) / tarifs.length : 0;
-            const tarif = tarifMois || reference;
-            if (!tarifMois && heures > 0) moisAuTarifFiche++;
+            const tarif = tarifParCollabMois.get(cle(collab.id, mois)) ?? 0;
+            if (tarif > 0) moisAvecTarif++;
+            else if (heures > 0) moisHeuresSansTarif++;
             const ca = round2(heures * tarif);
             const objectif = objectifParCollabMois.get(cle(collab.id, mois)) ?? 0;
             caParMois[mois - 1] += ca;
@@ -229,20 +202,11 @@ export async function exportSuiviObjectifMensuel(
                 collab: collab.name,
                 mois,
                 mois_nom: MOIS[mois - 1],
-                heures: formule(
-                    `SUMIFS(${columnRange(timesheets, "heures")},${parCollabMois},${columnRange(timesheets, "productivite")},"Oui",${columnRange(timesheets, "comptee")},"Oui")`,
-                    heures
-                ),
-                // Moyenne des tarifs du mois ; si aucune ligne n'a de tarif, tarif de la fiche employé.
-                tarif: formule(
-                    `IF(COUNTIFS(${parCollabMois},${avecTarif})>0,AVERAGEIFS(${columnRange(timesheets, "tarif")},${parCollabMois},${avecTarif}),${reference})`,
-                    tarif
-                ),
+                heures: formule(`SUMIFS(${columnRange(timesheets, "heures")},${filtre(timesheets)})`, heures),
+                // Tarif saisi pour ce mois (feuille Objectifs) ; aucun tarif → 0, donc CA réalisé 0.
+                tarif: formule(`MAXIFS(${columnRange(objectifs, "tarif")},${filtre(objectifs)})`, tarif),
                 ca: formule(`ROUND(${colonne("heures")}*${colonne("tarif")},2)`, ca),
-                objectif: formule(
-                    `SUMIFS(${columnRange(objectifs, "objectif")},${columnRange(objectifs, "collab")},${colonne("collab")},${columnRange(objectifs, "mois")},${colonne("mois")})`,
-                    objectif
-                ),
+                objectif: formule(`SUMIFS(${columnRange(objectifs, "objectif")},${filtre(objectifs)})`, objectif),
             });
         });
     });
@@ -310,11 +274,8 @@ export async function exportSuiviObjectifMensuel(
     const total = (key: string) => cellRef(suivi, key, ligneTotal, true);
     const nbCollab = scope.employees.length;
     const perimetre = `${nbCollab} collaborateur${nbCollab > 1 ? "s" : ""}, du ${frDate(new Date(debutAnnee))} au ${frDate(new Date(finAnnee))} (le cumul part de janvier)`;
-    const nbProductives = timesheets.rows.filter(r => r.productivite === "Oui" && r.comptee === "Oui").length;
-    const nbAvecTarif = timesheets.rows.filter(r => r.tarif).length;
-    const detailTarif = moisAuTarifFiche
-        ? `Moyenne des tarifs horaires des timesheets du collaborateur sur le mois (${nbAvecTarif} lignes avec un tarif) ; ${moisAuTarifFiche} mois sans tarif saisi → tarif de la fiche employé`
-        : `Moyenne des tarifs horaires des timesheets du collaborateur sur le mois (${nbAvecTarif} lignes avec un tarif)`;
+    const detailTarif = `Saisi pour chaque mois dans la fiche employé, onglet « Objectif » (${moisAvecTarif} mois-collaborateur avec un tarif)`
+        + (moisHeuresSansTarif ? ` ; ${moisHeuresSansTarif} mois avec des heures productives mais sans tarif → CA réalisé 0` : "");
 
     return {
         definition: {
@@ -325,8 +286,8 @@ export async function exportSuiviObjectifMensuel(
             metier: "Trajectoire commerciale dans l'année",
             tables: [
                 "staging.account_analytic_line", "staging.project_project", "staging.project_task",
-                "staging.x_suivi_annuel_employe", "staging.hr_employee", "staging.sale_order_line",
-                "staging.res_company", "kpi.operationnel_suivi_mensuel", "kpi.operationnel_synthese_annuelle",
+                "staging.x_suivi_annuel_employe", "staging.hr_employee", "staging.res_company",
+                "kpi.operationnel_suivi_mensuel",
             ],
             colonnes: [
                 {
@@ -334,16 +295,16 @@ export async function exportSuiviObjectifMensuel(
                     description: "CA généré par les heures productives",
                     metier: "CA généré réel",
                     formule: "Σ (h. productives × tarif horaire du mois)",
-                    source: "Timesheets",
-                    commentaire: "Tarif horaire du mois = moyenne des tarifs des timesheets du mois ; si aucun tarif n'est saisi ce mois-là : tarif de la fiche employé",
+                    source: "Timesheets + fiche employé, onglet « Objectif »",
+                    commentaire: "Tarif horaire saisi par mois dans l'onglet « Objectif » ; vide ou 0 → CA réalisé 0 pour ce mois",
                 },
                 {
                     nom: "CA objectif",
                     description: "Montant CHF à facturer sur le mois",
                     metier: "Cible fixée dans la fiche employé",
-                    formule: "Σ objectif CHF du mois",
+                    formule: "Σ objectif CHF du mois (= tarif horaire × objectif heures)",
                     source: "Fiche employé, onglet « Objectif »",
-                    commentaire: "Un objectif saisi pour un mois futur est compté",
+                    commentaire: "Calculé automatiquement dans Odoo ; un objectif saisi pour un mois futur est compté",
                 },
                 {
                     nom: "Écart mensuel",
@@ -368,7 +329,7 @@ export async function exportSuiviObjectifMensuel(
                 label: "CA réalisé (CHF)", formula: total("ca"), value: round2(totalCa), numFmt: CHF,
                 children: [
                     { label: "Périmètre", detail: perimetre },
-                    { label: "Heures", detail: `${nbProductives} lignes productives (Timesheets)` },
+                    { label: "Heures", detail: `${timesheets.rows.length} lignes productives (Timesheets)` },
                     { label: "Exclusion", detail: "Lignes « Congé (…) » à 0 CHF : jours fériés générés par Odoo, pas comptés dans les heures" },
                     { label: "Tarif horaire", detail: detailTarif },
                     { label: "Calcul", detail: "H. productives × tarif horaire, arrondi au centime, par collaborateur et mois (Par collaborateur) → Σ par mois → Σ des mois" },
