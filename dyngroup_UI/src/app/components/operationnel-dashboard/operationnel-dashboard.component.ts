@@ -83,6 +83,9 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
   collabData: Record<string, any> = {};
   globalData: any = {};
   collaboratorsList: string[] = [];
+  // KR12 — Rapports livrés (délai moyen de clôture des projets), déplacé du dashboard Finance
+  // (demande utilisateur du 2026-10-05) : une entrée par mois de l'année sélectionnée.
+  kr12: { period_key: string; actual_value: number | null; target_value: number; status: string }[] = [];
 
   // Calculated arrays
   filteredRealHours: number[] = [];
@@ -175,6 +178,7 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
         const data = await res.json();
         this.collabData = data.collab || {};
         this.globalData = data.global || {};
+        this.kr12 = Array.isArray(data.kr12) ? data.kr12 : [];
         this.collaboratorsList = Object.keys(this.collabData).sort();
         // Filtre "Société" (2026-09-17, remplace le filtre Département — le regroupement
         // Administration/Autre ne correspondait plus à aucun département réel dans Odoo).
@@ -436,6 +440,31 @@ export class OperationnelDashboardComponent implements OnInit, AfterViewInit, On
 
   mathRound(val: number): number {
     return Math.round(val);
+  }
+
+  // --- KR12 — Rapports livrés ---------------------------------------------------------------
+  /** Index de mois 0-11 à partir d'un period_key "YYYY-MM", pour filtrer comme les autres tableaux. */
+  krMonth(periodKey: string): number {
+    return parseInt(periodKey.slice(5, 7), 10) - 1;
+  }
+
+  /** Réutilise les classes de badge déjà existantes (.bdg-pos/.bdg-neu/.bdg-neg) de ce dashboard. */
+  krBadgeClass(status: string): string {
+    switch (status) {
+      case 'green': return 'bdg-pos';
+      case 'orange': return 'bdg-neu';
+      case 'red': return 'bdg-neg';
+      default: return '';
+    }
+  }
+
+  krStatusLabel(status: string): string {
+    switch (status) {
+      case 'green': return 'OK ✓';
+      case 'orange': return 'Surveiller';
+      case 'red': return 'En retard';
+      default: return '—';
+    }
   }
 
   // Objectifs de productivité — remplace un tableau à 5 niveaux (Seuil/0.5/1/1.5/2+) inventé

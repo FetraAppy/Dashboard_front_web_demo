@@ -170,59 +170,33 @@
     </div>
   </div>
 
-  <!-- Grid 3: DSO & KR12 -->
-  <div class="g2">
-    <div class="card">
-      <div class="ct">KR12 — Rapports livrés (clôture des projets)
-        
-      </div>
-      <div class="cs">Délai moyen de clôture des projets (jours) — cible J+10 <span class="tip" data-tip="Un rapport est considéré comme livré lorsque son projet est clôturé (archivé) dans Odoo. Le délai affiché est la moyenne entre l'ouverture et la clôture des projets du mois."></span></div>
-      <div class="table-wrapper" style="margin-top:12px;">
-        <table class="dt">
-          <thead><tr><th>Mois</th><th>Délai moyen (j)</th><th>Cible</th><th>Statut</th></tr></thead>
-          <tbody>
-            @for (entry of (krMap['KR12'] || []).slice(-6); track entry.period_key) {
-              <tr>
-                <td>{{ entry.period_key }}</td>
-                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
-                <td>{{ entry.target_value !== null ? gen(entry.target_value) + 'j' : '10j' }}</td>
-                <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'En retard' : '—' }}</span></td>
-              </tr>
-            }
-            @if (!krMap['KR12'] || krMap['KR12'].length === 0) {
-              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
-            }
-          </tbody>
-        </table>
-      </div>
+  <!-- KR20 — DSO débiteurs (KR12 déplacé vers Indicateurs Clés du dashboard Opérationnel,
+       2026-10-05 ; sorti de card-grid-2 qui n'a plus de sens à un seul enfant). -->
+  <div class="card">
+    <div class="ct">KR20 — DSO débiteurs
+
     </div>
+    <div class="cs">Jours de délai moyen — cible ≤ 45j</div>
+    <div class="cw"><canvas id="fi-kr2021"></canvas></div>
 
-    <div class="card">
-      <div class="ct">KR20 — DSO débiteurs
-        
-      </div>
-      <div class="cs">Jours de délai moyen — cible ≤ 45j</div>
-      <div class="cw"><canvas id="fi-kr2021"></canvas></div>
-
-      <!-- Table KR20 dynamique -->
-      <div class="table-wrapper" style="margin-top:12px;">
-        <table class="dt">
-          <thead><tr><th>Mois</th><th>DSO (j)</th><th>Cible</th><th>Statut</th></tr></thead>
-          <tbody>
-            @for (entry of (krMap['KR20'] || []).slice(-4); track entry.period_key) {
-              <tr>
-                <td>{{ entry.period_key }}</td>
-                <td>{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
-                <td>{{ entry.target_value !== null ? gen(entry.target_value) + 'j' : '45j' }}</td>
-                <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'Alerte' : '—' }}</span></td>
-              </tr>
-            }
-            @if (!krMap['KR20'] || krMap['KR20'].length === 0) {
-              <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
-            }
-          </tbody>
-        </table>
-      </div>
+    <!-- Table KR20 dynamique -->
+    <div class="table-wrapper" style="margin-top:12px;">
+      <table class="dt">
+        <thead><tr><th>Mois</th><th>DSO (j)</th><th>Cible</th><th>Statut</th></tr></thead>
+        <tbody>
+          @for (entry of (krMap['KR20'] || []).slice(-4); track entry.period_key) {
+            <tr>
+              <td>{{ entry.period_key }}</td>
+              <td>{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
+              <td>{{ entry.target_value !== null ? gen(entry.target_value) + 'j' : '45j' }}</td>
+              <td><span [class]="'badge ' + getStatusBadge(entry.status)">{{ entry.status === 'green' ? 'OK ✓' : entry.status === 'orange' ? 'Surveiller' : entry.status === 'red' ? 'Alerte' : '—' }}</span></td>
+            </tr>
+          }
+          @if (!krMap['KR20'] || krMap['KR20'].length === 0) {
+            <tr><td colspan="4" style="color:var(--text-secondary);text-align:center">Données non disponibles</td></tr>
+          }
+        </tbody>
+      </table>
     </div>
   </div>
 

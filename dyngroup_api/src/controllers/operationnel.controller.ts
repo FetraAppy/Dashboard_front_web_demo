@@ -688,10 +688,43 @@ export async function getDashboardData(req: Request, res: Response) {
         // toute l'année (cas BARBEN Thibaut).
         const etpMensuel = theoMensuel.parMois.map((v, i) => refTheo.parMois[i] > 0 ? v / refTheo.parMois[i] : 0);
 
+        // --- KR12 — Rapports livrés (délai moyen de clôture des projets) ---------------------
+        // Déplacé du dashboard Finance vers Indicateurs Clés (demande utilisateur du 2026-10-05).
+        // Filtré sur l'année sélectionnée ; pas de filtre société ici (project_project n'est pas
+        // rattaché aux employés affichés par ce contrôleur, contrairement au reste des données).
+        let kr12: { period_key: string; actual_value: number | null; target_value: number; status: string }[] = [];
+        try {
+            const r = await pool.query(
+                `SELECT TO_CHAR(write_date::date, 'YYYY-MM') AS month,
+                        ROUND(AVG(write_date::date - COALESCE(date_start::date, create_date::date))::numeric, 2) AS avg_days
+                 FROM staging."project_project"
+                 WHERE active = FALSE
+                   AND write_date IS NOT NULL AND write_date <> '' AND write_date <> 'False'
+                   AND EXTRACT(YEAR FROM write_date::date) = $1
+                 GROUP BY 1 ORDER BY 1`,
+                [annee]
+            );
+            // Seuils repris de l'ancien KR_CONFIG.KR12 (finance.controller.ts) : cible 10 jours,
+            // orange dès +1 jour au-dessus, rouge dès +2 jours au-dessus.
+            const TARGET = 10, ORANGE_DELTA = 1, RED_DELTA = 2;
+            kr12 = r.rows.map((row: any) => {
+                const actual = row.avg_days !== null ? parseFloat(row.avg_days) : null;
+                let status = "unknown";
+                if (actual !== null) {
+                    const diff = actual - TARGET;
+                    status = diff >= RED_DELTA ? "red" : diff >= ORANGE_DELTA ? "orange" : "green";
+                }
+                return { period_key: row.month as string, actual_value: actual, target_value: TARGET, status };
+            });
+        } catch (e: any) {
+            console.warn("[operationnel] KR12 (rapports livrés) indisponible :", e.message);
+        }
+
         res.json({
             collab,
             departments,
             companies,
+            kr12,
             global: {
                 theo: monthlyTheo,
                 ca_bud: monthlyBudget,

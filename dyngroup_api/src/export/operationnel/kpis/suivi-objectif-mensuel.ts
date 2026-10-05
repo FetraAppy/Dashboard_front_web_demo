@@ -125,11 +125,37 @@ export async function exportSuiviObjectifMensuel(
     });
 
     // --- Feuille "Objectifs" : tarif horaire et objectif CHF du mois -------------------------
+    // Une ligne par collaborateur et par mois (pas une ligne brute par enregistrement Odoo) :
+    // s'il existe plusieurs lignes "Objectif" pour le même mois (saisie en double dans Odoo), le
+    // tarif retient le plus élevé et l'objectif CHF la somme — mêmes règles que le dashboard
+    // (operationnel.controller.ts) et l'ETL. Agréger ici, plutôt que dans la formule Excel, évite
+    // toute fonction récente mal supportée (MAXIFS) : au plus une ligne par collaborateur+mois
+    // dans cette feuille, donc un simple SUMIFS suffit partout ensuite.
     const objectifParCollabMois = new Map<string, number>();
     const tarifParCollabMois = new Map<string, number>();
+    const aggregats = new Map<string, { date: Date; collab: string; societe: string; tarif: number; heures: number; objectif: number }>();
+    lignesObjectif.forEach(l => {
+        const collab = collabParId.get(l.employee_id);
+        if (!collab) return;
+        const [an, mois, jour] = l.date.split("-").map(Number);
+        const k = cle(collab.id, mois);
+        const objectif = parseFloat(l.objectif) || 0;
+        const tarif = parseFloat(l.tarif) || 0; // vide ou 0 → 0
+        const heures = parseFloat(l.heures) || 0;
+        objectifParCollabMois.set(k, (objectifParCollabMois.get(k) ?? 0) + objectif);
+        tarifParCollabMois.set(k, Math.max(tarifParCollabMois.get(k) ?? 0, tarif));
+        const acc = aggregats.get(k);
+        if (acc) {
+            acc.tarif = Math.max(acc.tarif, tarif);
+            acc.heures += heures;
+            acc.objectif += objectif;
+        } else {
+            aggregats.set(k, { date: new Date(Date.UTC(an, mois - 1, jour)), collab: collab.name, societe: collab.company ?? "", tarif, heures, objectif });
+        }
+    });
     const objectifs: DataSheet = {
         name: "Objectifs",
-        description: "Onglet « Objectif » de la fiche employé : tarif horaire, objectif heures et objectif CHF de chaque mois",
+        description: "Onglet « Objectif » de la fiche employé : tarif horaire, objectif heures et objectif CHF de chaque mois (agrégés si plusieurs lignes Odoo pour le même mois)",
         columns: [
             { header: "Mois objectif", key: "date", width: 14, numFmt: DATE },
             { header: "Mois", key: "mois", width: 7 },
@@ -139,28 +165,10 @@ export async function exportSuiviObjectifMensuel(
             { header: "Objectif heures", key: "heures", width: 15, numFmt: HEURES },
             { header: "Objectif CHF", key: "objectif", width: 14, numFmt: CHF },
         ],
-        rows: [],
+        rows: [...aggregats.entries()]
+            .sort(([, a], [, b]) => a.date.getTime() - b.date.getTime() || a.collab.localeCompare(b.collab))
+            .map(([k, v]) => ({ mois: Number(k.split("|")[1]), ...v })),
     };
-    lignesObjectif.forEach(l => {
-        const collab = collabParId.get(l.employee_id);
-        if (!collab) return;
-        const [an, mois, jour] = l.date.split("-").map(Number);
-        const k = cle(collab.id, mois);
-        const objectif = parseFloat(l.objectif) || 0;
-        // Vide ou 0 → 0 ; plusieurs lignes pour le même mois → le plus élevé (comme le dashboard).
-        const tarif = parseFloat(l.tarif) || 0;
-        objectifParCollabMois.set(k, (objectifParCollabMois.get(k) ?? 0) + objectif);
-        tarifParCollabMois.set(k, Math.max(tarifParCollabMois.get(k) ?? 0, tarif));
-        objectifs.rows.push({
-            date: new Date(Date.UTC(an, mois - 1, jour)),
-            mois,
-            collab: collab.name,
-            societe: collab.company ?? "",
-            tarif,
-            heures: parseFloat(l.heures) || 0,
-            objectif,
-        });
-    });
 
     // --- Feuille "Par collaborateur" : CA réalisé et objectif, 12 mois par collaborateur ----
     const parCollab: DataSheet = {
@@ -203,8 +211,9 @@ export async function exportSuiviObjectifMensuel(
                 mois,
                 mois_nom: MOIS[mois - 1],
                 heures: formule(`SUMIFS(${columnRange(timesheets, "heures")},${filtre(timesheets)})`, heures),
-                // Tarif saisi pour ce mois (feuille Objectifs) ; aucun tarif → 0, donc CA réalisé 0.
-                tarif: formule(`MAXIFS(${columnRange(objectifs, "tarif")},${filtre(objectifs)})`, tarif),
+                // Tarif saisi pour ce mois (feuille Objectifs, au plus une ligne par mois) ; aucun
+                // tarif → 0, donc CA réalisé 0.
+                tarif: formule(`SUMIFS(${columnRange(objectifs, "tarif")},${filtre(objectifs)})`, tarif),
                 ca: formule(`ROUND(${colonne("heures")}*${colonne("tarif")},2)`, ca),
                 objectif: formule(`SUMIFS(${columnRange(objectifs, "objectif")},${filtre(objectifs)})`, objectif),
             });

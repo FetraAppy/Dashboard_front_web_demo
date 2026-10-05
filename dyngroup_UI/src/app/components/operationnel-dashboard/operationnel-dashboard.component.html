@@ -233,6 +233,30 @@
       </div>
     </div>
 
+    <!-- KR12 — Rapports livrés (déplacé du dashboard Finance, 2026-10-05) -->
+    <div class="card" style="margin-bottom: 24px;">
+      <div class="chart-title">KR12 — Rapports livrés (clôture des projets)</div>
+      <div class="chart-subtitle">Délai moyen de clôture des projets (jours) — cible J+10</div>
+      <div class="table-wrapper" style="margin-top: 12px;">
+        <table class="data-table">
+          <thead><tr><th>Mois</th><th style="text-align: right;">Délai moyen (j)</th><th style="text-align: right;">Cible</th><th style="text-align: right;">Statut</th></tr></thead>
+          <tbody>
+            <ng-container *ngFor="let entry of kr12">
+              <tr *ngIf="activeMonth === 'all' || activeMonth === krMonth(entry.period_key).toString()">
+                <td>{{ entry.period_key }}</td>
+                <td style="text-align: right;">{{ entry.actual_value !== null ? gen(entry.actual_value) : '—' }}</td>
+                <td style="text-align: right;">{{ entry.target_value }}j</td>
+                <td style="text-align: right;">
+                  <span [class]="'bdg ' + krBadgeClass(entry.status)">{{ krStatusLabel(entry.status) }}</span>
+                </td>
+              </tr>
+            </ng-container>
+            <tr *ngIf="kr12.length === 0"><td colspan="4" style="color: var(--text-muted); text-align: center;">Données non disponibles</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Paramètres & Synthèse — masqué temporairement sur demande (2026-09-16), code conservé
          intact ci-dessous, pas supprimé. -->
     <div class="card" *ngIf="false">
