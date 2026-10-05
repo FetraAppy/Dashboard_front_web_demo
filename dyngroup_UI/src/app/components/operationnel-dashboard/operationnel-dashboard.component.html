@@ -121,6 +121,7 @@
     <!-- KPI Cards Grid -->
     <div class="card-grid-4">
       <div class="kpi-card" style="border-left-color: var(--finance);">
+        <app-export-button kpiId="objectif-facturation" [params]="exportParams" style="position: absolute; top: 12px; left: 12px;"></app-export-button>
         <div class="kpi-card-header">
           <span class="kpi-id">OBJECTIF</span>
         </div>
@@ -154,6 +155,7 @@
       </div>
 
       <div class="kpi-card" style="border-left-color: var(--rh);">
+        <app-export-button kpiId="productivite-mensuelle" [params]="exportParams" style="position: absolute; top: 12px; left: 12px;"></app-export-button>
         <div class="kpi-card-header">
           <span class="kpi-id">EFFICACITÉ</span>
         </div>
@@ -448,7 +450,10 @@
 
         <!-- Non Facturable Chart -->
         <div class="card">
-          <div class="chart-title">Heures non facturables cumulées</div>
+          <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+            <span>Heures non facturables cumulées</span>
+            <app-export-button kpiId="heures-non-facturables" [params]="exportParams"></app-export-button>
+          </div>
           <div class="chart-subtitle">Répartition par catégorie — {{ getFilterInfo() }}</div>
           <div class="chart-subtitle"><strong>Total : {{ formatHours(nonFactTotal) }}</strong></div>
           <div class="chart-container" style="height: 230px;">
